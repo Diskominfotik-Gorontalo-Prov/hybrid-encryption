@@ -1,0 +1,21 @@
+{
+  "name": "aptika/laravel-hybrid-encryption",
+  "description": "Hybrid RSA-OAEP + AES-256-GCM encryption package for Laravel.",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": "^8.2",
+    "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
+    "illuminate/filesystem": "^10.0|^11.0|^12.0|^13.0"
+  },
+  "require-dev": {
+    "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+    "phpunit/phpunit": "^10.5|^11.0|^12.0"
+  },
+  "autoload": {"psr-4": {"Aptika\\HybridEncryption\\": "src/"}},
+  "autoload-dev": {"psr-4": {"Aptika\\HybridEncryption\\Tests\\": "tests/"}},
+  "extra": {"laravel": {"providers": ["Aptika\\HybridEncryption\\HybridEncryptionServiceProvider"], "aliases": {"HybridEncryption": "Aptika\\HybridEncryption\\Facades\\HybridEncryption"}}},
+  "scripts": {"test": "phpunit"},
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
