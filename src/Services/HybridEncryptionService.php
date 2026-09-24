@@ -129,7 +129,7 @@ class HybridEncryptionService
     private function resolveAesKey(?string $aesKey): string
     {
         if ($aesKey !== null) {
-            return $this->normalizeAesKey($aesKey);
+            return app(AesKeyService::class)->normalize($aesKey);
         }
 
         $appKey = config('app.key');
@@ -150,24 +150,6 @@ class HybridEncryptionService
 
         // APP_KEY base64: milik Laravel langsung digunakan sebagai AES-256 key.
         return $material;
-    }
-
-    /** Mengubah AES key base64: atau 32 byte mentah menjadi key AES-256. */
-    private function normalizeAesKey(string $aesKey): string
-    {
-        if (str_starts_with($aesKey, 'base64:')) {
-            $decoded = base64_decode(substr($aesKey, 7), true);
-            if ($decoded === false) {
-                throw new EncryptionException('Format AES key Base64 tidak valid.');
-            }
-            $aesKey = $decoded;
-        }
-
-        if (strlen($aesKey) !== 32) {
-            throw new EncryptionException('AES key harus berukuran 32 byte untuk AES-256.');
-        }
-
-        return $aesKey;
     }
 
     /** Memastikan semua field payload binary tersedia. */

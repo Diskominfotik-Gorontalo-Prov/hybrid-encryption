@@ -6,6 +6,7 @@ namespace Aptika\HybridEncryption\Tests\Unit;
 
 use Aptika\HybridEncryption\Exceptions\DecryptionException;
 use Aptika\HybridEncryption\Exceptions\EncryptionException;
+use Aptika\HybridEncryption\Services\AesKeyService;
 use Aptika\HybridEncryption\Services\HybridEncryptionService;
 use Aptika\HybridEncryption\Services\KeyPairService;
 use Aptika\HybridEncryption\Tests\TestCase;
@@ -127,5 +128,17 @@ class HybridEncryptionTest extends TestCase
 
         Storage::disk('local')->assertMissing($paths['public_path']);
         Storage::disk('local')->assertMissing($paths['private_path']);
+    }
+
+    /** Memastikan command khusus menghasilkan AES key 32 byte yang valid. */
+    public function test_generate_aes_key_command_outputs_valid_key(): void
+    {
+        $this->artisan('hybrid-encryption:generate-aes-key')
+            ->expectsOutput('AES-256 key berhasil dibuat.')
+            ->expectsOutputToContain('AES key: base64:')
+            ->assertExitCode(0);
+
+        $key = app(AesKeyService::class)->generate();
+        $this->assertSame(32, strlen(app(AesKeyService::class)->normalize($key)));
     }
 }

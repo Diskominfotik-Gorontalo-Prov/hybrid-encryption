@@ -5,6 +5,7 @@ namespace Aptika\HybridEncryption\Commands;
 use Aptika\HybridEncryption\Exceptions\KeyManagementException;
 use Aptika\HybridEncryption\Services\KeyPairService;
 use Aptika\HybridEncryption\Services\HybridEncryptionService;
+use Aptika\HybridEncryption\Services\AesKeyService;
 use Illuminate\Console\Command;
 
 /** Command untuk membuat RSA key pair pada satu disk dengan visibility terkonfigurasi. */
@@ -14,7 +15,7 @@ class GenerateKeyPairCommand extends Command
     protected $description = 'Membuat RSA key pair dan menentukan sumber AES key berdasarkan key_id';
 
     /** Membuat key pair dan menampilkan lokasi penyimpanannya. */
-    public function handle(KeyPairService $keys, HybridEncryptionService $crypto): int
+    public function handle(KeyPairService $keys, HybridEncryptionService $crypto, AesKeyService $aes): int
     {
         $keyId = (string) $this->argument('key_id');
 
@@ -54,7 +55,7 @@ class GenerateKeyPairCommand extends Command
 
         if ($source === 'generated') {
             // AES key hanya ditampilkan satu kali dan tidak disimpan package.
-            $aesKey = 'base64:' . base64_encode(random_bytes(32));
+            $aesKey = $aes->generate();
         }
 
         try {

@@ -7,9 +7,11 @@
 namespace Aptika\HybridEncryption;
 
 use Aptika\HybridEncryption\Commands\GenerateKeyPairCommand;
+use Aptika\HybridEncryption\Commands\GenerateAesKeyCommand;
 use Aptika\HybridEncryption\Commands\RevokeKeyPairCommand;
 use Aptika\HybridEncryption\Services\HybridEncryptionService;
 use Aptika\HybridEncryption\Services\KeyPairService;
+use Aptika\HybridEncryption\Services\AesKeyService;
 use Illuminate\Support\ServiceProvider;
 
 class HybridEncryptionServiceProvider extends ServiceProvider
@@ -25,6 +27,7 @@ class HybridEncryptionServiceProvider extends ServiceProvider
 
         // Service untuk membuat dan membaca key pair berdasarkan key_id.
         $this->app->singleton(KeyPairService::class);
+        $this->app->singleton(AesKeyService::class);
 
         // Agar class konkret juga dapat di-resolve melalui container Laravel.
         $this->app->alias('hybrid-encryption', HybridEncryptionService::class);
@@ -37,6 +40,7 @@ class HybridEncryptionServiceProvider extends ServiceProvider
 
         // Command hanya didaftarkan saat Laravel berjalan dalam mode console.
         if ($this->app->runningInConsole()) $this->commands([
+            GenerateAesKeyCommand::class,
             GenerateKeyPairCommand::class,
             RevokeKeyPairCommand::class,
         ]);

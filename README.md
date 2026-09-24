@@ -258,6 +258,36 @@ php artisan hybrid-encryption:generate-key-pair features/bantuan --aes-source=ge
 
 Tanpa `--aes-source`, command menanyakan pilihan `app_key` atau `generated`. Mode `app_key` menggunakan `APP_KEY` Laravel. Jika belum tersedia, command menjalankan `php artisan key:generate` tanpa menimpa `APP_KEY` yang sudah ada. Mode `generated` membuat AES key acak 32 byte, menampilkannya satu kali, dan tidak menyimpan file AES.
 
+### Membuat AES key mandiri
+
+Jika hanya membutuhkan AES key baru tanpa membuat RSA key pair baru, jalankan:
+
+```bash
+php artisan hybrid-encryption:generate-aes-key
+```
+
+Contoh output:
+
+```text
+AES-256 key berhasil dibuat.
+AES key: base64:...
+Fingerprint: ...
+```
+
+Gunakan AES key tersebut saat encrypt dan decrypt:
+
+```php
+$aesKey = env('FEATURE_BANTUAN_AES_KEY');
+
+$payload = $crypto->encrypt('features/bantuan', $data, $aesKey);
+$result = $crypto->decrypt('features/bantuan', $payload, $aesKey);
+```
+
+Command membuat 32 byte acak dengan `random_bytes(32)`, memformatnya sebagai
+`base64:...`, dan tidak menulis AES key ke disk. Simpan hasilnya di secret
+manager atau environment. Jangan menyimpan output tersebut di Git, log,
+response API, atau frontend.
+
 Jika key pair sudah ada, command tidak melempar stack trace. Command menampilkan pesan dan berhenti tanpa mengubah key:
 
 ```text
@@ -434,6 +464,22 @@ Membaca isi public atau private key dari disk yang sesuai. Jika file tidak ditem
 ### `KeyPairService::paths(string $keyId): array`
 
 Mengembalikan `key_id`, nama disk, dan path public/private key tanpa membaca isi key.
+
+### `AesKeyService::generate(): string`
+
+Membuat AES-256 key acak 32 byte dalam format `base64:`. Key tidak disimpan oleh package dan harus diamankan oleh aplikasi.
+
+### `AesKeyService::normalize(string $aesKey): string`
+
+Mendecode AES key berformat `base64:` atau menerima 32 byte mentah. Method menolak key yang ukurannya tidak tepat untuk AES-256.
+
+### `AesKeyService::fingerprint(string $aesKey): string`
+
+Menghasilkan fingerprint SHA-256 untuk verifikasi tanpa menampilkan isi AES key.
+
+### `GenerateAesKeyCommand::handle(AesKeyService $aes): int`
+
+Menjalankan command `hybrid-encryption:generate-aes-key` untuk menghasilkan AES key mandiri tanpa membuat RSA key pair.
 
 ### `KeyPairService::exists(string $keyId): bool`
 
