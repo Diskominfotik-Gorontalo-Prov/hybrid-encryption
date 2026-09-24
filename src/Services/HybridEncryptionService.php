@@ -7,11 +7,16 @@ use Aptika\HybridEncryption\Exceptions\EncryptionException;
 use Aptika\HybridEncryption\Exceptions\KeyManagementException;
 use JsonException;
 
-/** Service enkripsi yang selalu menggunakan key pair berdasarkan key_id. */
+/** Service enkripsi yang menggunakan RSA untuk membungkus AES key. */
 class HybridEncryptionService
 {
-    /** Mengenkripsi data menggunakan public key untuk key_id tertentu. */
-    public function encrypt(string $keyId, array|string $data): array
+    /**
+     * Mengenkripsi data berdasarkan key_id.
+     *
+     * Jika $aesKey kosong, AES key diturunkan dari APP_KEY Laravel. Jika diisi,
+     * nilainya digunakan sebagai AES key yang diberikan aplikasi.
+     */
+    public function encrypt(string $keyId, array|string $data, ?string $aesKey = null): array
     {
         try {
             $pem = app(KeyPairService::class)->publicKey($keyId);
@@ -24,28 +29,25 @@ class HybridEncryptionService
             throw new EncryptionException('Public key tidak valid.');
         }
 
-        // Array diubah menjadi JSON sebelum dienkripsi.
         $plaintext = is_array($data)
             ? json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
             : $data;
-
-        // AES key diturunkan dari APP_KEY agar pengirim dan penerima memakai key yang sama.
-        $aesKey = $this->aesKey();
-        // IV tetap dibuat baru untuk setiap payload agar aman digunakan berulang.
+        $resolvedAesKey = $this->resolveAesKey($aesKey);
         $iv = random_bytes(12);
-        $ciphertext = openssl_encrypt($plaintext, config('hybrid-encryption.cipher', 'aes-256-gcm'), $aesKey, OPENSSL_RAW_DATA, $iv, $tag);
+        $ciphertext = openssl_encrypt($plaintext, config('hybrid-encryption.cipher', 'aes-256-gcm'), $resolvedAesKey, OPENSSL_RAW_DATA, $iv, $tag);
         if ($ciphertext === false) {
             throw new EncryptionException('AES encryption gagal.');
         }
 
         // RSA hanya membungkus AES key, bukan seluruh data.
-        if (!openssl_public_encrypt($aesKey, $encryptedKey, $publicKey, OPENSSL_PKCS1_OAEP_PADDING)) {
+        if (!openssl_public_encrypt($resolvedAesKey, $encryptedKey, $publicKey, OPENSSL_PKCS1_OAEP_PADDING)) {
             throw new EncryptionException('RSA encryption untuk AES key gagal.');
         }
 
         return [
-            'version' => 2,
-            'alg' => 'RSA-OAEP+A256GCM+APP_KEY',
+            'version' => 3,
+            'alg' => 'RSA-OAEP+A256GCM',
+            'aes_source' => $aesKey === null ? 'app_key' : 'provided',
             'encrypted_key' => base64_encode($encryptedKey),
             'iv' => base64_encode($iv),
             'tag' => base64_encode($tag),
@@ -53,10 +55,14 @@ class HybridEncryptionService
         ];
     }
 
-    /** Mendekripsi data menggunakan private key untuk key_id tertentu. */
-    public function decrypt(string $keyId, array|string $payload, ?string $passphrase = null): array|string
+    /**
+     * Mendekripsi payload berdasarkan key_id.
+     *
+     * $aesKey harus diisi dengan nilai yang sama ketika payload dibuat jika
+     * payload menggunakan sumber AES generated/provided.
+     */
+    public function decrypt(string $keyId, array|string $payload, ?string $aesKey = null): array|string
     {
-        // Payload boleh diterima sebagai array PHP atau string JSON dari request API.
         if (is_string($payload)) {
             try {
                 $payload = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
@@ -77,7 +83,7 @@ class HybridEncryptionService
             throw new DecryptionException($exception->getMessage(), previous: $exception);
         }
 
-        $privateKey = openssl_pkey_get_private($pem, $passphrase ?? '');
+        $privateKey = openssl_pkey_get_private($pem, '');
         if (!$privateKey) {
             throw new DecryptionException('Private key tidak valid.');
         }
@@ -86,18 +92,21 @@ class HybridEncryptionService
         $iv = $this->b64($payload['iv']);
         $tag = $this->b64($payload['tag']);
         $ciphertext = $this->b64($payload['data']);
-
-        if (!openssl_private_decrypt($encryptedKey, $aesKey, $privateKey, OPENSSL_PKCS1_OAEP_PADDING)) {
+        if (!openssl_private_decrypt($encryptedKey, $recoveredAesKey, $privateKey, OPENSSL_PKCS1_OAEP_PADDING)) {
             throw new DecryptionException('RSA decrypt AES key gagal.');
         }
 
-        // Menolak payload dari APP_KEY yang berbeda sebelum proses AES.
-        if (!hash_equals($this->aesKey(), $aesKey)) {
-            throw new DecryptionException('APP_KEY aplikasi tidak cocok dengan APP_KEY pembuat payload.');
+        // Pastikan AES key dari payload sama dengan key yang diharapkan aplikasi.
+        try {
+            $expectedAesKey = $this->resolveAesKey($aesKey);
+        } catch (EncryptionException $exception) {
+            throw new DecryptionException($exception->getMessage(), previous: $exception);
+        }
+        if (!hash_equals($expectedAesKey, $recoveredAesKey)) {
+            throw new DecryptionException('AES key tidak cocok dengan payload.');
         }
 
-        // AES-GCM memeriksa tag dan menolak payload yang sudah diubah.
-        $plaintext = openssl_decrypt($ciphertext, config('hybrid-encryption.cipher', 'aes-256-gcm'), $aesKey, OPENSSL_RAW_DATA, $iv, $tag);
+        $plaintext = openssl_decrypt($ciphertext, config('hybrid-encryption.cipher', 'aes-256-gcm'), $recoveredAesKey, OPENSSL_RAW_DATA, $iv, $tag);
         if ($plaintext === false) {
             throw new DecryptionException('AES decrypt gagal atau payload telah dimodifikasi.');
         }
@@ -110,17 +119,17 @@ class HybridEncryptionService
         }
     }
 
-    /** Mengembalikan sidik jari AES tanpa membocorkan nilai AES key. */
-    public function aesKeyFingerprint(): string
+    /** Mengembalikan fingerprint AES tanpa membocorkan AES key. */
+    public function aesKeyFingerprint(?string $aesKey = null): string
     {
-        return hash('sha256', $this->aesKey());
+        return hash('sha256', $this->resolveAesKey($aesKey));
     }
 
-    /** Menurunkan AES-256 key dari APP_KEY Laravel yang sedang aktif. */
-    private function aesKey(): string
+    /** Menentukan AES key dari APP_KEY atau dari input aplikasi. */
+    private function resolveAesKey(?string $aesKey): string
     {
-        if (config('hybrid-encryption.aes_key_source', 'app_key') !== 'app_key') {
-            throw new EncryptionException('Sumber AES key tidak didukung.');
+        if ($aesKey !== null) {
+            return $this->normalizeAesKey($aesKey);
         }
 
         $appKey = config('app.key');
@@ -128,7 +137,6 @@ class HybridEncryptionService
             throw new EncryptionException('APP_KEY Laravel belum dikonfigurasi.');
         }
 
-        // Laravel biasanya menyimpan APP_KEY dalam format base64:....
         $material = str_starts_with($appKey, 'base64:')
             ? base64_decode(substr($appKey, 7), true)
             : $appKey;
@@ -139,7 +147,25 @@ class HybridEncryptionService
         return hash('sha256', 'aptika-hybrid-encryption|aes-key|' . $material, true);
     }
 
-    /** Memastikan semua field binary payload tersedia. */
+    /** Mengubah AES key base64: atau 32 byte mentah menjadi key AES-256. */
+    private function normalizeAesKey(string $aesKey): string
+    {
+        if (str_starts_with($aesKey, 'base64:')) {
+            $decoded = base64_decode(substr($aesKey, 7), true);
+            if ($decoded === false) {
+                throw new EncryptionException('Format AES key Base64 tidak valid.');
+            }
+            $aesKey = $decoded;
+        }
+
+        if (strlen($aesKey) !== 32) {
+            throw new EncryptionException('AES key harus berukuran 32 byte untuk AES-256.');
+        }
+
+        return $aesKey;
+    }
+
+    /** Memastikan semua field payload binary tersedia. */
     private function validatePayload(array $payload): void
     {
         foreach (['encrypted_key', 'iv', 'tag', 'data'] as $field) {

@@ -17,11 +17,11 @@ Menurut source code plugin saat ini:
 | Komponen | Perilaku plugin | Catatan keamanan |
 | --- | --- | --- |
 | Enkripsi data | `aes-256-gcm` melalui `openssl_encrypt` | AES-GCM menyediakan kerahasiaan dan authentication tag untuk mendeteksi perubahan payload. |
-| Kunci AES | Hasil `SHA-256` atas `APP_KEY` dan label internal plugin | Ini adalah derivasi khusus plugin, bukan mekanisme `APP_KEY` Laravel yang otomatis menjadi AES-GCM key. Kedua aplikasi harus memakai `APP_KEY` yang sama. |
+| Kunci AES | Default: hasil `SHA-256` atas `APP_KEY` dan label internal plugin. Override: AES key 32 byte yang diberikan aplikasi. | Derivasi APP_KEY adalah mekanisme khusus plugin, bukan mekanisme `APP_KEY` Laravel yang otomatis menjadi AES-GCM key. Mode override mengharuskan kedua aplikasi memakai AES key generated yang sama. |
 | IV GCM | `random_bytes(12)` pada setiap payload | 12 byte adalah IV 96-bit. IV tidak rahasia dan harus ikut dikirim bersama ciphertext. Pengulangan IV dengan key GCM yang sama harus dihindari. |
 | Pembungkusan kunci AES | RSA dengan `OPENSSL_PKCS1_OAEP_PADDING` | RSA hanya membungkus kunci AES, bukan seluruh data. Digest OAEP tidak dipilih eksplisit oleh kode saat ini; parameter aktual perlu diverifikasi terhadap versi OpenSSL/PHP yang digunakan. |
 | RSA default | 3072 bit dari konfigurasi plugin | Berdasarkan tabel NIST, RSA 3072-bit dipetakan ke sekitar 128-bit security strength. |
-| Payload | `encrypted_key`, `iv`, `tag`, dan `data` dalam Base64 | Base64 hanya encoding, bukan enkripsi tambahan. |
+| Payload | `encrypted_key`, `iv`, `tag`, dan `data` dalam Base64, serta `aes_source` sebagai metadata | Base64 hanya encoding, bukan enkripsi tambahan. `aes_source` tidak berisi AES key. |
 
 ## Apa arti “tingkat keamanan”
 
@@ -152,21 +152,26 @@ APP_KEY Laravel
   -> 32 byte AES key untuk AES-256-GCM
 ```
 
+Jika aplikasi memberikan `$aesKey`, alur tersebut diganti dengan validasi AES
+key 32 byte yang diberikan. Plugin tidak menyimpan AES generated. Nilai yang
+sama harus dikelola dan diberikan kembali saat decrypt.
+
 Konsekuensinya:
 
-1. App1 dan App2 yang harus saling bertukar payload harus memakai nilai
-   `APP_KEY` yang sama persis dan konfigurasi derivasi yang sama.
-2. Mengganti `APP_KEY` membuat AES key hasil derivasi berubah. Payload lama tidak
+1. Mode `app_key` pada App1 dan App2 yang harus saling bertukar payload harus
+   memakai nilai `APP_KEY` yang sama persis dan konfigurasi derivasi yang sama.
+2. Mode `generated` harus memakai AES key generated yang sama pada App1 dan App2.
+3. Mengganti `APP_KEY` membuat AES key mode `app_key` berubah. Payload lama tidak
    dapat didekripsi dengan key hasil derivasi baru.
-3. `APP_KEY` harus diperlakukan sebagai secret lintas aplikasi dalam skenario
+4. `APP_KEY` harus diperlakukan sebagai secret lintas aplikasi dalam skenario
    ini. Jangan menaruhnya pada payload, log, repository, atau frontend.
-4. Menyamakan `APP_KEY` antar aplikasi memperluas dampak kebocoran satu aplikasi.
+5. Menyamakan `APP_KEY` antar aplikasi memperluas dampak kebocoran satu aplikasi.
    Untuk desain dengan blast radius lebih kecil, gunakan secret khusus integrasi
    atau KDF/key-management terpisah; perubahan itu memerlukan perubahan desain
    plugin dan kontrak payload.
-5. Command plugin menampilkan fingerprint AES, bukan nilai AES mentah. Fingerprint
-   hanya alat verifikasi kesamaan key dan tetap tidak boleh dianggap sebagai
-   pengganti pengamanan secret.
+6. Command plugin menampilkan fingerprint AES. Mode `generated` juga menampilkan
+   nilai AES satu kali agar pengguna dapat menyimpannya di secret manager; nilai
+   tersebut tidak disimpan oleh package.
 
 Sumber primer:
 
@@ -183,8 +188,9 @@ Klaim berikut aman bila konfigurasi dan operasi plugin sesuai source code:
   public/private key.
 - Dengan RSA 3072-bit, NIST memetakan komponen RSA tersebut ke sekitar 128-bit
   security strength.
-- Payload yang dibuat dengan `APP_KEY` berbeda akan gagal melewati pemeriksaan
-  kesamaan kunci AES plugin.
+- Payload mode `app_key` yang dibuat dengan `APP_KEY` berbeda akan gagal melewati
+  pemeriksaan kesamaan kunci AES plugin.
+- Payload mode `generated` yang didekripsi dengan AES key berbeda akan ditolak.
 
 Klaim berikut tidak boleh dibuat tanpa perubahan dan audit tambahan:
 
@@ -209,6 +215,8 @@ Klaim berikut tidak boleh dibuat tanpa perubahan dan audit tambahan:
 - [ ] Jangan kirim private key atau `APP_KEY` ke aplikasi client/browser.
 - [ ] Gunakan TLS dan autentikasi endpoint; enkripsi payload bukan pengganti TLS.
 - [ ] Pastikan IV GCM tidak pernah digunakan ulang dengan AES key yang sama.
+- [ ] Simpan AES generated di secret manager/environment jika mode `generated`
+      digunakan; package tidak menyediakan penyimpanan ulang.
 - [ ] Batasi percobaan decrypt/tag yang gagal dan catat kejadian tanpa mencatat
       plaintext, `APP_KEY`, private key, atau AES key.
 - [ ] Rencanakan rotasi RSA key dan `APP_KEY`; rotasi `APP_KEY` memerlukan
@@ -222,4 +230,3 @@ Penelitian dilakukan pada 24 September 2026 menggunakan sumber primer yang
 ditautkan di atas. Standar, dokumentasi PHP, OpenSSL, dan Laravel dapat berubah;
 verifikasi ulang versi yang berlaku sebelum membuat keputusan kepatuhan,
 sertifikasi, atau threat model produksi.
-

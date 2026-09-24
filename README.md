@@ -1,6 +1,6 @@
 # Laravel Hybrid Encryption
 
-Package Laravel untuk mengenkripsi payload menggunakan AES-256-GCM dan RSA-OAEP. AES key diturunkan dari `APP_KEY` Laravel, sehingga aplikasi pengirim dan penerima wajib memakai `APP_KEY` yang sama.
+Package Laravel untuk mengenkripsi payload menggunakan AES-256-GCM dan RSA-OAEP. AES key dapat berasal dari `APP_KEY` Laravel atau diberikan oleh aplikasi sebagai AES key generated.
 
 ## Alur encrypt dan decrypt
 
@@ -10,18 +10,22 @@ Package Laravel untuk mengenkripsi payload menggunakan AES-256-GCM dan RSA-OAEP.
 flowchart TD
     E0([Mulai encrypt]) --> E1[Input: key_id dan data asli]
     E1 --> E2[KeyPairService membaca public.pem berdasarkan key_id]
-    E1 --> E3[Laravel membaca APP_KEY]
-    E3 --> E4[Derivasi AES-256 key]
-    E1 --> E5[Buat IV acak 12 byte]
-    E4 --> E6[AES-GCM encrypt]
-    E5 --> E6
-    E6 --> E7[Hasil: data ciphertext dan authentication tag]
-    E2 --> E8[RSA-OAEP encrypt AES key]
-    E8 --> E9[Hasil: encrypted_key]
-    E7 --> E10[Gabungkan payload]
-    E9 --> E10
-    E5 --> E10
-    E10 --> E11([Payload JSON dikirim])
+    E1 --> E3{Pilih sumber AES key}
+    E3 -->|aesKey kosong| E4[Derivasi AES-256 key dari APP_KEY]
+    E3 -->|aesKey diberikan| E5[Validasi AES key 32 byte]
+    E1 --> E6[Buat IV acak 12 byte]
+    E4 --> E7[AES-GCM encrypt]
+    E5 --> E7
+    E6 --> E7
+    E7 --> E8[Hasil: data ciphertext dan authentication tag]
+    E2 --> E9[RSA-OAEP encrypt AES key]
+    E4 --> E9
+    E5 --> E9
+    E9 --> E10[Hasil: encrypted_key]
+    E8 --> E11[Gabungkan payload]
+    E10 --> E11
+    E6 --> E11
+    E11 --> E12([Payload JSON dikirim])
 ```
 
 Hasil encrypt tidak menyimpan data asli. Payload hanya berisi `encrypted_key`, `iv`, `tag`, dan `data`.
@@ -36,19 +40,21 @@ flowchart TD
     D2 --> D4[RSA-OAEP decrypt]
     D3 --> D4
     D4 --> D5[AES key dari payload]
-    D1 --> D6[Laravel membaca APP_KEY]
-    D6 --> D7[Derivasi AES-256 key lokal]
+    D1 --> D6{AES key diberikan?}
+    D6 -->|Tidak| D7[Derivasi AES-256 key dari APP_KEY]
+    D6 -->|Ya| D10[Validasi AES key 32 byte]
     D5 --> D8{AES key sama?}
     D7 --> D8
     D8 -->|Tidak| D9([Gagal: APP_KEY berbeda])
-    D8 -->|Ya| D10[Ambil data, iv, dan tag dari payload]
-    D10 --> D11[AES-GCM decrypt dan validasi tag]
-    D11 --> D12{Payload valid?}
-    D12 -->|Tidak| D13([Gagal: payload diubah])
-    D12 -->|Ya| D14([Data asli dikembalikan])
+    D8 -->|Ya| D11[Ambil data, iv, dan tag dari payload]
+    D10 --> D8
+    D11 --> D12[AES-GCM decrypt dan validasi tag]
+    D12 --> D13{Payload valid?}
+    D13 -->|Tidak| D14([Gagal: payload diubah])
+    D13 -->|Ya| D15([Data asli dikembalikan])
 ```
 
-Urutannya adalah: RSA membuka AES key terlebih dahulu, kemudian AES-GCM membuka data. `APP_KEY` tidak mengenkripsi payload secara langsung; `APP_KEY` digunakan untuk menghasilkan AES key yang sama pada proses encrypt dan decrypt.
+Urutannya adalah: RSA membuka AES key terlebih dahulu, kemudian AES-GCM membuka data. Jika `$aesKey` tidak diberikan, plugin menggunakan `APP_KEY`; jika `$aesKey` diberikan, plugin menggunakan key tersebut pada encrypt dan decrypt.
 
 Jika `APP_KEY` berbeda, validasi AES key gagal. Jika RSA private key tidak cocok dengan public key yang digunakan saat encrypt, `encrypted_key` tidak dapat dibuka.
 
@@ -106,7 +112,6 @@ File `config/hybrid-encryption.php`:
 ```php
 return [
     'cipher' => 'aes-256-gcm',
-    'aes_key_source' => 'app_key',
     'rsa_bits' => (int) env('APTIKA_HYBRID_ENCRYPTION_RSA_BITS', 3072),
     'key_storage' => [
         'disk' => env('APTIKA_HYBRID_ENCRYPTION_KEY_DISK', 'local'),
@@ -125,7 +130,7 @@ APTIKA_HYBRID_ENCRYPTION_RSA_BITS=3072
 
 `cipher` saat ini ditetapkan package sebagai `aes-256-gcm`. `rsa_bits` digunakan saat membuat key baru.
 
-`aes_key_source` saat ini harus bernilai `app_key`. Jangan mengganti `APP_KEY` pada salah satu aplikasi jika data lama masih harus didekripsi. Nilai `APP_KEY` tidak perlu ditampilkan atau disimpan ulang oleh package.
+Jika AES key tidak diberikan pada method, package menggunakan `APP_KEY` Laravel. Jika AES key diberikan pada method, package menggunakan AES key tersebut dan tidak menyimpannya.
 
 `key_storage` digunakan untuk key pair per user atau per fitur. Public dan private key disimpan pada satu disk Laravel yang sama, tetapi foldernya berbeda. Default-nya adalah disk `local` dengan visibility `private`:
 
@@ -151,6 +156,24 @@ $payload = HybridEncryption::encrypt($keyId, [
 
 $data = HybridEncryption::decrypt($keyId, $payload);
 // ['nik' => '750101xxxxxxxxxx', 'nama' => 'Alfandy']
+```
+
+Untuk AES key hasil generate, berikan key yang sama saat encrypt dan decrypt:
+
+```php
+$aesKey = env('FEATURE_BANTUAN_AES_KEY'); // format base64:... atau 32 byte
+
+$payload = HybridEncryption::encrypt(
+    'features/bantuan',
+    'alfandy',
+    $aesKey
+);
+
+$data = HybridEncryption::decrypt(
+    'features/bantuan',
+    $payload,
+    $aesKey
+);
 ```
 
 Dependency injection juga tersedia:
@@ -193,7 +216,7 @@ $data = $crypto->decrypt(
    php artisan hybrid-encryption:generate-key-pair features/antar-project
    ```
 
-2. Pastikan A dan B memiliki akses ke public key B melalui disk yang sesuai.
+2. Pastikan A dan B memiliki akses ke public key B melalui disk yang sesuai. Jika memakai AES generated, simpan AES key yang sama pada secret manager kedua aplikasi.
 3. Di A gunakan `key_id` B:
 
    ```php
@@ -230,7 +253,10 @@ Buat key pair menggunakan `key_id` yang stabil dan aman, misalnya:
 ```bash
 php artisan hybrid-encryption:generate-key-pair users/10/profile
 php artisan hybrid-encryption:generate-key-pair features/bantuan
+php artisan hybrid-encryption:generate-key-pair features/bantuan --aes-source=generated
 ```
+
+Tanpa `--aes-source`, command menanyakan pilihan `app_key` atau `generated`. Mode `app_key` menggunakan `APP_KEY` Laravel. Jika belum tersedia, command menjalankan `php artisan key:generate` tanpa menimpa `APP_KEY` yang sudah ada. Mode `generated` membuat AES key acak 32 byte, menampilkannya satu kali, dan tidak menyimpan file AES.
 
 Key tersebut disimpan berdasarkan konfigurasi disk, dengan pola:
 
@@ -272,8 +298,9 @@ $privatePem = $keys->privateKey('users/10/profile');
 
 ```json
 {
-  "version": 2,
-  "alg": "RSA-OAEP+A256GCM+APP_KEY",
+  "version": 3,
+  "alg": "RSA-OAEP+A256GCM",
+  "aes_source": "app_key",
   "encrypted_key": "base64...",
   "iv": "base64...",
   "tag": "base64...",
@@ -283,8 +310,9 @@ $privatePem = $keys->privateKey('users/10/profile');
 
 | Field | Keterangan |
 | --- | --- |
-| `version` | Versi format payload, saat ini `2`. |
-| `alg` | Penanda kombinasi algoritma dan sumber AES key. |
+| `version` | Versi format payload, saat ini `3`. |
+| `alg` | Penanda kombinasi algoritma. |
+| `aes_source` | Informasi sumber AES: `app_key` atau `provided`; bukan AES key. |
 | `encrypted_key` | Kunci AES yang dienkripsi RSA-OAEP. |
 | `iv` | Initialization vector AES-GCM 12 byte, dalam Base64. |
 | `tag` | Authentication tag AES-GCM, dalam Base64. |
@@ -327,17 +355,18 @@ Implementasi saat ini memakai `OPENSSL_PKCS1_OAEP_PADDING`, tetapi source code t
 
 RSA-3072 dan AES-256 merupakan pilihan kuat untuk banyak aplikasi saat ini jika key, APP_KEY, IV, private key, server, dan implementasi dikelola dengan benar. Pernyataan ini adalah penilaian berdasarkan tabel perbandingan NIST, bukan jaminan bahwa aplikasi bebas dari semua serangan.
 
-### Peran APP_KEY pada package ini
+### Sumber AES key pada package ini
 
-Package menurunkan AES-256 key dari `APP_KEY` Laravel menggunakan SHA-256 dengan konteks package. `APP_KEY` tidak dikirim di dalam payload. Karena itu:
+Jika `$aesKey` kosong, package menurunkan AES-256 key dari `APP_KEY` Laravel menggunakan SHA-256 dengan konteks package. Jika `$aesKey` diberikan, package memakai AES key 32 byte tersebut. AES key tidak dikirim sebagai plaintext di payload; RSA membungkus AES key ke field `encrypted_key`.
 
-- App pengirim dan penerima harus memiliki `APP_KEY` yang sama.
-- Jangan menampilkan AES key hasil derivasi atau `APP_KEY` ke log/command output.
-- Mengganti `APP_KEY` membuat payload lama tidak dapat didekripsi.
+- Mode `app_key` pada App1 dan App2 harus memakai `APP_KEY` yang sama.
+- Mode `generated` pada App1 dan App2 harus memakai AES key generated yang sama.
+- Jangan mencatat AES key generated atau `APP_KEY` ke log.
+- Mengganti `APP_KEY` membuat payload mode `app_key` lama tidak dapat didekripsi.
 - Siapa pun yang memperoleh `APP_KEY` dan private RSA key dapat mencoba membuka payload yang ditujukan kepada aplikasi tersebut.
 - Karena `APP_KEY` juga merupakan root key Laravel, kompromi `APP_KEY` dapat berdampak pada fungsi Laravel lain yang menggunakannya. Simpan secret ini di secret manager atau environment yang terlindungi.
 
-Catatan implementasi: proses SHA-256 di sini adalah derivasi deterministik untuk kebutuhan package, bukan password KDF seperti Argon2 atau scrypt. `APP_KEY` harus dibuat oleh Laravel secara acak dan tidak boleh berupa password buatan manusia.
+Catatan implementasi: proses SHA-256 di sini adalah derivasi deterministik untuk mode `app_key`, bukan password KDF seperti Argon2 atau scrypt. `APP_KEY` harus dibuat oleh Laravel secara acak dan tidak boleh berupa password buatan manusia. Mode `generated` menggunakan 32 byte acak dan tidak disimpan oleh package.
 
 ### Batasan keamanan yang perlu ditangani aplikasi
 
@@ -353,15 +382,15 @@ Riset dan pemetaan sumber primer yang lebih lengkap tersedia di [docs/security-r
 
 ## Referensi fungsi
 
-### `HybridEncryptionService::encrypt(string $keyId, array|string $data): array`
+### `HybridEncryptionService::encrypt(string $keyId, array|string $data, ?string $aesKey = null): array`
 
-Mengenkripsi array atau string menggunakan public key yang disimpan untuk `$keyId`. AES key diturunkan dari `APP_KEY`, IV dibuat acak untuk setiap payload, plaintext dienkripsi dengan AES-GCM, lalu AES key dibungkus memakai RSA-OAEP.
+Mengenkripsi array atau string menggunakan public key yang disimpan untuk `$keyId`. Jika `$aesKey` kosong, AES key diturunkan dari `APP_KEY`; jika diisi, key tersebut digunakan. IV dibuat acak untuk setiap payload, plaintext dienkripsi dengan AES-GCM, lalu AES key dibungkus memakai RSA-OAEP.
 
 Melempar `EncryptionException` bila public key tidak ditemukan/tidak valid, pembuatan JSON array gagal, atau proses AES/RSA gagal.
 
-### `HybridEncryptionService::decrypt(string $keyId, array|string $payload, ?string $passphrase = null): array|string`
+### `HybridEncryptionService::decrypt(string $keyId, array|string $payload, ?string $aesKey = null): array|string`
 
-Memvalidasi field payload, membuka kunci AES menggunakan private key untuk `$keyId`, lalu mendekripsi data dengan AES-GCM. Payload dapat berupa array PHP atau string JSON. `$passphrase` dapat diisi untuk private key yang dilindungi passphrase.
+Memvalidasi field payload, membuka kunci AES menggunakan private key untuk `$keyId`, lalu mendekripsi data dengan AES-GCM. Payload dapat berupa array PHP atau string JSON. Jika payload dibuat dengan AES generated, `$aesKey` yang sama wajib diberikan.
 
 Melempar `DecryptionException` bila field wajib tidak valid, private key gagal dibuka, Base64 tidak valid, RSA gagal, atau authentication tag AES tidak cocok.
 
@@ -377,9 +406,9 @@ Membaca isi public atau private key dari disk yang sesuai. Jika file tidak ditem
 
 Mengembalikan `key_id`, nama disk, dan path public/private key tanpa membaca isi key.
 
-### `GenerateKeyPairCommand::handle(KeyPairService $keys): int`
+### `GenerateKeyPairCommand::handle(KeyPairService $keys, HybridEncryptionService $crypto): int`
 
-Menjalankan pembuatan key pair berbasis key ID melalui command `hybrid-encryption:generate-key-pair`. Command menampilkan disk, path public/private key, dan fingerprint AES. Nilai AES key mentah tidak pernah ditampilkan.
+Menjalankan pembuatan key pair berbasis key ID melalui command `hybrid-encryption:generate-key-pair`. Command bertanya apakah memakai `APP_KEY` atau membuat AES key generated. AES generated ditampilkan satu kali, tidak disimpan package, dan harus diamankan oleh pengguna. Command juga menampilkan disk, path public/private key, dan fingerprint AES.
 
 ### `HybridEncryptionService::b64(string $value): string`
 
@@ -449,7 +478,7 @@ php artisan hybrid-encryption:generate-key-pair default
 ## Catatan keamanan dan batasan
 
 - Gunakan HTTPS/TLS saat mengirim payload.
-- `APP_KEY` App1 dan App2 harus sama persis agar AES key hasil derivasi sama.
+- Pada mode `app_key`, `APP_KEY` App1 dan App2 harus sama persis agar AES key hasil derivasi sama. Pada mode `generated`, kedua aplikasi harus menerima AES key generated yang sama.
 - Jangan mengganti `APP_KEY` jika payload lama masih diperlukan. Jika diganti, payload lama tidak dapat didekripsi.
 - Jangan commit `private.pem`; tambahkan lokasi key ke `.gitignore`.
 - `--force` pada command key pair mengganti key dan membuat ciphertext dengan key lama tidak dapat didekripsi oleh key baru.

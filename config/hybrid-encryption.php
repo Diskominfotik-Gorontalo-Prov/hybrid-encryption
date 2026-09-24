@@ -4,9 +4,6 @@ return [
     // Cipher authenticated encryption untuk isi payload.
     'cipher' => 'aes-256-gcm',
 
-    // Sumber kunci AES. Nilai app_key harus sama pada aplikasi pengirim dan penerima.
-    'aes_key_source' => 'app_key',
-
     // Ukuran RSA key yang digunakan oleh command generate-key-pair.
     'rsa_bits' => (int) env('APTIKA_HYBRID_ENCRYPTION_RSA_BITS', 3072),
 
