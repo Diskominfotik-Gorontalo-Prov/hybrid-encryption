@@ -126,7 +126,7 @@ Di project Laravel:
 ```bash
 composer require aptika/laravel-hybrid-encryption
 php artisan vendor:publish --tag=hybrid-encryption-config
-php artisan hybrid-encryption:generate-key-pair default
+php artisan aptika-hybrid-encryption:generate-key-pair default
 ```
 
 Laravel menemukan service provider dan facade melalui Composer auto-discovery. Jika auto-discovery dinonaktifkan, daftarkan provider berikut secara manual:
@@ -256,7 +256,7 @@ $data = $crypto->decrypt(
 1. Di project B buat key pair:
 
    ```bash
-   php artisan hybrid-encryption:generate-key-pair features/antar-project
+   php artisan aptika-hybrid-encryption:generate-key-pair features/antar-project
    ```
 
 2. Pastikan A dan B memiliki akses ke public key B melalui disk yang sesuai. Jika memakai AES generated, simpan AES key yang sama pada secret manager kedua aplikasi.
@@ -298,9 +298,9 @@ Public key boleh dibagikan kepada pengirim; private key tidak boleh dibagikan.
 Untuk key khusus user atau fitur, gunakan `key_id` yang stabil dan aman, misalnya:
 
 ```bash
-php artisan hybrid-encryption:generate-key-pair users/10/profile
-php artisan hybrid-encryption:generate-key-pair features/bantuan
-php artisan hybrid-encryption:generate-key-pair features/bantuan --aes-source=generated
+php artisan aptika-hybrid-encryption:generate-key-pair users/10/profile
+php artisan aptika-hybrid-encryption:generate-key-pair features/bantuan
+php artisan aptika-hybrid-encryption:generate-key-pair features/bantuan --aes-source=generated
 ```
 
 Tanpa `--aes-source`, command menanyakan pilihan `app_key` atau `generated`. Mode `app_key` menggunakan `APP_KEY` Laravel. Jika belum tersedia, command menjalankan `php artisan key:generate` tanpa menimpa `APP_KEY` yang sudah ada. Mode `generated` membuat AES key acak 32 byte, menampilkannya satu kali, dan tidak menyimpan file AES.
@@ -310,7 +310,7 @@ Tanpa `--aes-source`, command menanyakan pilihan `app_key` atau `generated`. Mod
 Jika hanya membutuhkan AES key baru tanpa membuat RSA key pair baru, jalankan:
 
 ```bash
-php artisan hybrid-encryption:generate-aes-key
+php artisan aptika-hybrid-encryption:generate-aes-key
 ```
 
 Contoh output:
@@ -349,21 +349,21 @@ Jika memang ingin mengganti key, jalankan ulang dengan --force.
 Untuk mengganti key tanpa pertanyaan, gunakan `--force`:
 
 ```bash
-php artisan hybrid-encryption:generate-key-pair default --force
+php artisan aptika-hybrid-encryption:generate-key-pair default --force
 ```
 
 Untuk mencabut dan menghapus public/private key:
 
 ```bash
-php artisan hybrid-encryption:revoke-key-pair
-php artisan hybrid-encryption:revoke-key-pair default
+php artisan aptika-hybrid-encryption:revoke-key-pair
+php artisan aptika-hybrid-encryption:revoke-key-pair default
 ```
 
 Tanpa `key_id`, revoke menggunakan `default`. Tanpa `--force`, command meminta
 validasi hitungan `2 + 3`. Untuk proses terotomasi:
 
 ```bash
-php artisan hybrid-encryption:revoke-key-pair default --force
+php artisan aptika-hybrid-encryption:revoke-key-pair default --force
 ```
 
 Revoke bersifat destruktif terhadap kemampuan decrypt: payload lama yang hanya
@@ -594,7 +594,7 @@ Menghasilkan fingerprint SHA-256 untuk verifikasi tanpa menampilkan isi AES key.
 
 ### `GenerateAesKeyCommand::handle(AesKeyService $aes): int`
 
-Menjalankan command `hybrid-encryption:generate-aes-key` untuk menghasilkan AES key mandiri tanpa membuat RSA key pair.
+Menjalankan command `aptika-hybrid-encryption:generate-aes-key` untuk menghasilkan AES key mandiri tanpa membuat RSA key pair.
 
 ### `KeyPairService::exists(string $keyId): bool`
 
@@ -607,7 +607,7 @@ Menghapus public dan private key untuk `key_id`. Gunakan melalui command revoke 
 ### `GenerateKeyPairCommand::handle(KeyPairService $keys, HybridEncryptionService $crypto): int`
 
 Menjalankan pembuatan key pair berbasis key ID melalui command
-`hybrid-encryption:generate-key-pair`. Jika `key_id` tidak diberikan, digunakan
+`aptika-hybrid-encryption:generate-key-pair`. Jika `key_id` tidak diberikan, digunakan
 `default`. Command bertanya apakah memakai `APP_KEY` atau membuat AES key
 generated. Saat key lama ditemukan, command meminta hasil hitungan `2 + 3` untuk
 konfirmasi timpa; `--force` melewati validasi tersebut. AES generated ditampilkan
@@ -681,7 +681,7 @@ Kemudian:
 
 ```bash
 composer require aptika/laravel-hybrid-encryption:@dev
-php artisan hybrid-encryption:generate-key-pair default
+php artisan aptika-hybrid-encryption:generate-key-pair default
 ```
 
 ## Catatan keamanan dan batasan

@@ -111,7 +111,7 @@ class HybridEncryptionTest extends TestCase
     /** Memastikan command dapat membuat RSA key dan menghasilkan AES generated. */
     public function test_generate_key_pair_command_outputs_generated_aes_key(): void
     {
-        $this->artisan('hybrid-encryption:generate-key-pair', [
+        $this->artisan('aptika-hybrid-encryption:generate-key-pair', [
             'key_id' => 'features/command',
             '--aes-source' => 'generated',
         ])
@@ -124,7 +124,7 @@ class HybridEncryptionTest extends TestCase
     /** Memastikan command existing key menghasilkan pesan ramah tanpa stack trace. */
     public function test_generate_existing_key_returns_friendly_failure(): void
     {
-        $this->artisan('hybrid-encryption:generate-key-pair', [
+        $this->artisan('aptika-hybrid-encryption:generate-key-pair', [
             'key_id' => $this->keyId,
             '--aes-source' => 'app_key',
         ])
@@ -140,7 +140,7 @@ class HybridEncryptionTest extends TestCase
     {
         $paths = app(KeyPairService::class)->paths($this->keyId);
 
-        $this->artisan('hybrid-encryption:revoke-key-pair', [
+        $this->artisan('aptika-hybrid-encryption:revoke-key-pair', [
             'key_id' => $this->keyId,
             '--force' => true,
         ])
@@ -154,7 +154,7 @@ class HybridEncryptionTest extends TestCase
     /** Memastikan command khusus menghasilkan AES key 32 byte yang valid. */
     public function test_generate_aes_key_command_outputs_valid_key(): void
     {
-        $this->artisan('hybrid-encryption:generate-aes-key')
+        $this->artisan('aptika-hybrid-encryption:generate-aes-key')
             ->expectsOutput('AES-256 key berhasil dibuat.')
             ->expectsOutputToContain('AES key: base64:')
             ->assertExitCode(0);

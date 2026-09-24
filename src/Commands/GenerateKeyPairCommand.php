@@ -11,7 +11,7 @@ use Illuminate\Console\Command;
 /** Command untuk membuat RSA key pair pada satu disk dengan visibility terkonfigurasi. */
 class GenerateKeyPairCommand extends Command
 {
-    protected $signature = 'hybrid-encryption:generate-key-pair {key_id=default : Identitas key, misalnya users/10/profile} {--force : Timpa key yang sudah ada} {--aes-source= : Sumber AES: app_key atau generated}';
+    protected $signature = 'aptika-hybrid-encryption:generate-key-pair {key_id=default : Identitas key, misalnya users/10/profile} {--force : Timpa key yang sudah ada} {--aes-source= : Sumber AES: app_key atau generated}';
     protected $description = 'Membuat RSA key pair dan menentukan sumber AES key berdasarkan key_id';
 
     /** Membuat key pair dan menampilkan lokasi penyimpanannya. */

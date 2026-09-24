@@ -9,7 +9,7 @@ use Illuminate\Console\Command;
 /** Command untuk mencabut dan menghapus pasangan RSA key. */
 class RevokeKeyPairCommand extends Command
 {
-    protected $signature = 'hybrid-encryption:revoke-key-pair {key_id=default : Identitas key yang akan dicabut} {--force : Lewati konfirmasi}';
+    protected $signature = 'aptika-hybrid-encryption:revoke-key-pair {key_id=default : Identitas key yang akan dicabut} {--force : Lewati konfirmasi}';
     protected $description = 'Mencabut dan menghapus public/private key berdasarkan key_id';
 
     /** Menghapus key setelah konfirmasi pengguna. */

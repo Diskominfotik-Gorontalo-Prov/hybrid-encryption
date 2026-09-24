@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 /** Command untuk membuat AES-256 key yang tidak disimpan oleh package. */
 class GenerateAesKeyCommand extends Command
 {
-    protected $signature = 'hybrid-encryption:generate-aes-key';
+    protected $signature = 'aptika-hybrid-encryption:generate-aes-key';
     protected $description = 'Membuat AES-256 key acak yang siap digunakan aplikasi';
 
     /** Membuat dan menampilkan AES key satu kali. */
