@@ -1,6 +1,6 @@
 {
   "name": "aptika-encryption",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Package Laravel untuk mengenkripsi payload menggunakan AES-256-GCM dan RSA-OAEP. AES key diturunkan dari `APP_KEY` Laravel, sehingga aplikasi pengirim dan penerima wajib memakai `APP_KEY` yang sama.",
   "homepage": "https://github.com/Diskominfotik-Gorontalo-Prov/hybrid-encryption#readme",
   "bugs": {
