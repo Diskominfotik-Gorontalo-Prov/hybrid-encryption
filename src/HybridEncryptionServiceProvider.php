@@ -7,6 +7,7 @@
 namespace Aptika\HybridEncryption;
 
 use Aptika\HybridEncryption\Commands\GenerateKeyPairCommand;
+use Aptika\HybridEncryption\Commands\RevokeKeyPairCommand;
 use Aptika\HybridEncryption\Services\HybridEncryptionService;
 use Aptika\HybridEncryption\Services\KeyPairService;
 use Illuminate\Support\ServiceProvider;
@@ -35,6 +36,9 @@ class HybridEncryptionServiceProvider extends ServiceProvider
         $this->publishes([__DIR__.'/../config/hybrid-encryption.php' => config_path('hybrid-encryption.php')], 'hybrid-encryption-config');
 
         // Command hanya didaftarkan saat Laravel berjalan dalam mode console.
-        if ($this->app->runningInConsole()) $this->commands([GenerateKeyPairCommand::class]);
+        if ($this->app->runningInConsole()) $this->commands([
+            GenerateKeyPairCommand::class,
+            RevokeKeyPairCommand::class,
+        ]);
     }
 }

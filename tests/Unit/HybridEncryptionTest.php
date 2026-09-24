@@ -99,4 +99,33 @@ class HybridEncryptionTest extends TestCase
             ->expectsOutputToContain('AES key: base64:')
             ->assertExitCode(0);
     }
+
+    /** Memastikan command existing key menghasilkan pesan ramah tanpa stack trace. */
+    public function test_generate_existing_key_returns_friendly_failure(): void
+    {
+        $this->artisan('hybrid-encryption:generate-key-pair', [
+            'key_id' => $this->keyId,
+            '--aes-source' => 'app_key',
+        ])
+            ->expectsOutput("Pasangan key untuk key_id [{$this->keyId}] sudah ada.")
+            ->expectsOutput('Key lama tidak diubah.')
+            ->expectsOutput('Jika memang ingin mengganti key, jalankan ulang dengan --force.')
+            ->assertExitCode(1);
+    }
+
+    /** Memastikan revoke menghapus public dan private key setelah --force. */
+    public function test_revoke_key_pair_removes_both_keys(): void
+    {
+        $paths = app(KeyPairService::class)->paths($this->keyId);
+
+        $this->artisan('hybrid-encryption:revoke-key-pair', [
+            'key_id' => $this->keyId,
+            '--force' => true,
+        ])
+            ->expectsOutput("Key untuk key_id [{$this->keyId}] berhasil dicabut.")
+            ->assertExitCode(0);
+
+        Storage::disk('local')->assertMissing($paths['public_path']);
+        Storage::disk('local')->assertMissing($paths['private_path']);
+    }
 }

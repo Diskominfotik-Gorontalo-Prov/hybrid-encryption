@@ -51,6 +51,37 @@ class KeyPairService
         return $paths;
     }
 
+    /** Memeriksa apakah salah satu atau kedua file key sudah tersedia. */
+    public function exists(string $keyId): bool
+    {
+        $paths = $this->paths($keyId);
+        $disk = Storage::disk($paths['disk']);
+
+        return $disk->exists($paths['public_path']) || $disk->exists($paths['private_path']);
+    }
+
+    /**
+     * Menghapus public dan private key berdasarkan key_id.
+     *
+     * @return array{key_id: string, disk: string, public_path: string, private_path: string, removed_public: bool, removed_private: bool}
+     */
+    public function remove(string $keyId): array
+    {
+        $paths = $this->paths($keyId);
+        $disk = Storage::disk($paths['disk']);
+        $removedPublic = $disk->delete($paths['public_path']);
+        $removedPrivate = $disk->delete($paths['private_path']);
+
+        return [
+            'key_id' => $keyId,
+            'disk' => $paths['disk'],
+            'public_path' => $paths['public_path'],
+            'private_path' => $paths['private_path'],
+            'removed_public' => $removedPublic,
+            'removed_private' => $removedPrivate,
+        ];
+    }
+
     /** Mengambil isi public key untuk dipakai saat encrypt. */
     public function publicKey(string $keyId): string
     {

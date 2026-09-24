@@ -2,6 +2,7 @@
 
 namespace Aptika\HybridEncryption\Commands;
 
+use Aptika\HybridEncryption\Exceptions\KeyManagementException;
 use Aptika\HybridEncryption\Services\KeyPairService;
 use Aptika\HybridEncryption\Services\HybridEncryptionService;
 use Illuminate\Console\Command;
@@ -15,6 +16,22 @@ class GenerateKeyPairCommand extends Command
     /** Membuat key pair dan menampilkan lokasi penyimpanannya. */
     public function handle(KeyPairService $keys, HybridEncryptionService $crypto): int
     {
+        $keyId = (string) $this->argument('key_id');
+
+        try {
+            if (!$this->option('force') && $keys->exists($keyId)) {
+                $this->error("Pasangan key untuk key_id [{$keyId}] sudah ada.");
+                $this->line('Key lama tidak diubah.');
+                $this->line('Jika memang ingin mengganti key, jalankan ulang dengan --force.');
+
+                return self::FAILURE;
+            }
+        } catch (KeyManagementException $exception) {
+            $this->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
+
         $source = $this->option('aes-source') ?: $this->choice(
             'Gunakan APP_KEY Laravel sebagai AES key?',
             ['app_key', 'generated'],
@@ -40,7 +57,14 @@ class GenerateKeyPairCommand extends Command
             $aesKey = 'base64:' . base64_encode(random_bytes(32));
         }
 
-        $paths = $keys->generate((string) $this->argument('key_id'), (bool) $this->option('force'));
+        try {
+            $paths = $keys->generate($keyId, (bool) $this->option('force'));
+        } catch (KeyManagementException $exception) {
+            $this->error($exception->getMessage());
+            $this->line('Tidak ada key yang diubah. Periksa konfigurasi disk dan key_id.');
+
+            return self::FAILURE;
+        }
         $this->info("Key berhasil dibuat untuk key_id [{$paths['key_id']}].");
         $this->line("AES source: {$source}");
         $this->line("Disk: {$paths['disk']}");

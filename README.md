@@ -258,6 +258,35 @@ php artisan hybrid-encryption:generate-key-pair features/bantuan --aes-source=ge
 
 Tanpa `--aes-source`, command menanyakan pilihan `app_key` atau `generated`. Mode `app_key` menggunakan `APP_KEY` Laravel. Jika belum tersedia, command menjalankan `php artisan key:generate` tanpa menimpa `APP_KEY` yang sudah ada. Mode `generated` membuat AES key acak 32 byte, menampilkannya satu kali, dan tidak menyimpan file AES.
 
+Jika key pair sudah ada, command tidak melempar stack trace. Command menampilkan pesan dan berhenti tanpa mengubah key:
+
+```text
+Pasangan key untuk key_id [default] sudah ada.
+Key lama tidak diubah.
+Jika memang ingin mengganti key, jalankan ulang dengan --force.
+```
+
+Untuk mengganti key secara sadar:
+
+```bash
+php artisan hybrid-encryption:generate-key-pair default --force
+```
+
+Untuk mencabut dan menghapus public/private key:
+
+```bash
+php artisan hybrid-encryption:revoke-key-pair default
+```
+
+Command akan meminta konfirmasi. Untuk proses terotomasi:
+
+```bash
+php artisan hybrid-encryption:revoke-key-pair default --force
+```
+
+Revoke bersifat destruktif terhadap kemampuan decrypt: payload lama yang hanya
+memiliki pasangan key tersebut tidak dapat dibuka setelah private key dihapus.
+
 Key tersebut disimpan berdasarkan konfigurasi disk, dengan pola:
 
 ```text
@@ -406,9 +435,21 @@ Membaca isi public atau private key dari disk yang sesuai. Jika file tidak ditem
 
 Mengembalikan `key_id`, nama disk, dan path public/private key tanpa membaca isi key.
 
+### `KeyPairService::exists(string $keyId): bool`
+
+Memeriksa apakah public atau private key untuk `key_id` sudah ada.
+
+### `KeyPairService::remove(string $keyId): array`
+
+Menghapus public dan private key untuk `key_id`. Gunakan melalui command revoke agar ada konfirmasi pengguna.
+
 ### `GenerateKeyPairCommand::handle(KeyPairService $keys, HybridEncryptionService $crypto): int`
 
 Menjalankan pembuatan key pair berbasis key ID melalui command `hybrid-encryption:generate-key-pair`. Command bertanya apakah memakai `APP_KEY` atau membuat AES key generated. AES generated ditampilkan satu kali, tidak disimpan package, dan harus diamankan oleh pengguna. Command juga menampilkan disk, path public/private key, dan fingerprint AES.
+
+### `RevokeKeyPairCommand::handle(KeyPairService $keys): int`
+
+Mencabut dan menghapus public/private key berdasarkan `key_id` setelah konfirmasi. Opsi `--force` melewati konfirmasi dan hanya boleh digunakan pada proses terkontrol.
 
 ### `HybridEncryptionService::b64(string $value): string`
 
@@ -482,6 +523,7 @@ php artisan hybrid-encryption:generate-key-pair default
 - Jangan mengganti `APP_KEY` jika payload lama masih diperlukan. Jika diganti, payload lama tidak dapat didekripsi.
 - Jangan commit `private.pem`; tambahkan lokasi key ke `.gitignore`.
 - `--force` pada command key pair mengganti key dan membuat ciphertext dengan key lama tidak dapat didekripsi oleh key baru.
+- `revoke-key-pair` menghapus public/private key dan membuat payload terkait tidak dapat didekripsi; pastikan backup/migrasi sudah selesai sebelum revoke.
 - Package menyediakan confidentiality dan integrity melalui AES-GCM, tetapi belum menyediakan proteksi replay. Untuk produksi lintas sistem pertimbangkan `timestamp`, `request_id`, `kid`, expiry, dan penyimpanan request ID yang sudah diproses.
 - Pastikan permission directory dan private key dibatasi oleh user aplikasi.
 - Jangan menyimpan private key pada disk yang dapat diakses publik atau pada response API.
