@@ -9,13 +9,13 @@ use Illuminate\Console\Command;
 /** Command untuk mencabut dan menghapus pasangan RSA key. */
 class RevokeKeyPairCommand extends Command
 {
-    protected $signature = 'hybrid-encryption:revoke-key-pair {key_id : Identitas key yang akan dicabut} {--force : Lewati konfirmasi}';
+    protected $signature = 'hybrid-encryption:revoke-key-pair {key_id=default : Identitas key yang akan dicabut} {--force : Lewati konfirmasi}';
     protected $description = 'Mencabut dan menghapus public/private key berdasarkan key_id';
 
     /** Menghapus key setelah konfirmasi pengguna. */
     public function handle(KeyPairService $keys): int
     {
-        $keyId = (string) $this->argument('key_id');
+        $keyId = trim((string) $this->argument('key_id')) ?: 'default';
 
         try {
             if (!$keys->exists($keyId)) {
@@ -29,13 +29,15 @@ class RevokeKeyPairCommand extends Command
             return self::FAILURE;
         }
 
-        if (!$this->option('force') && !$this->confirm(
-            "Cabut dan hapus public/private key [{$keyId}]? Payload lama tidak dapat didekripsi lagi.",
-            false
-        )) {
-            $this->info('Pembatalan: key tetap disimpan.');
+        if (!$this->option('force')) {
+            $answer = $this->ask(
+                "Key [{$keyId}] akan dicabut dan payload lama tidak dapat didekripsi. Berapa hasil 2 + 3?"
+            );
+            if ((int) $answer !== 5) {
+                $this->info('Pembatalan: key tetap disimpan.');
 
-            return self::SUCCESS;
+                return self::SUCCESS;
+            }
         }
 
         try {

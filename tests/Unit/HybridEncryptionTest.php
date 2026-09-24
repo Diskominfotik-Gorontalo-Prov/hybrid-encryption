@@ -28,7 +28,17 @@ class HybridEncryptionTest extends TestCase
             'hybrid-encryption.key_storage.private_prefix' => 'test/private',
         ]);
 
+        app(KeyPairService::class)->generate('default');
         app(KeyPairService::class)->generate($this->keyId);
+    }
+
+    /** Memastikan key_id dan AES key kosong memakai default. */
+    public function test_empty_key_id_and_aes_key_use_defaults(): void
+    {
+        $service = app(HybridEncryptionService::class);
+        $payload = $service->encrypt('data-default');
+
+        $this->assertSame('data-default', $service->decrypt($payload));
     }
 
     /** Memastikan array memakai AES APP_KEY dan menghasilkan string kompak. */
@@ -36,7 +46,7 @@ class HybridEncryptionTest extends TestCase
     {
         $service = app(HybridEncryptionService::class);
         $original = ['user_id' => 10, 'secret' => 'rahasia'];
-        $payload = $service->encrypt($this->keyId, $original);
+        $payload = $service->encrypt($original, $this->keyId);
 
         $this->assertIsString($payload);
         $this->assertStringStartsWith('AHE3.', $payload);
@@ -44,17 +54,16 @@ class HybridEncryptionTest extends TestCase
         $this->assertStringNotContainsString('aes_source', $payload);
         $appKeyMaterial = base64_decode(substr((string) config('app.key'), 7), true);
         $this->assertSame(hash('sha256', $appKeyMaterial), $service->aesKeyFingerprint());
-        $this->assertSame($original, $service->decrypt($this->keyId, $payload));
+        $this->assertSame($original, $service->decrypt($payload, $this->keyId));
     }
 
     /** Memastikan string kompak dapat langsung didekripsi. */
     public function test_compact_payload_string_can_be_decrypted(): void
     {
         $service = app(HybridEncryptionService::class);
-        $payload = $service->encrypt($this->keyId, 'alfandy');
+        $payload = $service->encrypt('alfandy');
 
         $this->assertSame('alfandy', $service->decrypt(
-            $this->keyId,
             $payload
         ));
     }
@@ -65,10 +74,10 @@ class HybridEncryptionTest extends TestCase
         $service = app(HybridEncryptionService::class);
         $aesKey = 'base64:' . base64_encode(random_bytes(32));
         $original = ['feature' => 'bantuan', 'enabled' => true];
-        $payload = $service->encrypt($this->keyId, $original, $aesKey);
+        $payload = $service->encrypt($original, $this->keyId, $aesKey);
 
         $this->assertIsString($payload);
-        $this->assertSame($original, $service->decrypt($this->keyId, $payload, $aesKey));
+        $this->assertSame($original, $service->decrypt($payload, $this->keyId, $aesKey));
     }
 
     /** Memastikan AES key yang salah ditolak. */
@@ -77,10 +86,10 @@ class HybridEncryptionTest extends TestCase
         $service = app(HybridEncryptionService::class);
         $aesKey = 'base64:' . base64_encode(random_bytes(32));
         $wrongAesKey = 'base64:' . base64_encode(random_bytes(32));
-        $payload = $service->encrypt($this->keyId, 'rahasia', $aesKey);
+        $payload = $service->encrypt('rahasia', $this->keyId, $aesKey);
 
         $this->expectException(DecryptionException::class);
-        $service->decrypt($this->keyId, $payload, $wrongAesKey);
+        $service->decrypt($payload, $this->keyId, $wrongAesKey);
     }
 
     /** Memastikan AES key dengan ukuran yang salah ditolak saat encrypt. */
@@ -88,7 +97,7 @@ class HybridEncryptionTest extends TestCase
     {
         $this->expectException(EncryptionException::class);
 
-        app(HybridEncryptionService::class)->encrypt($this->keyId, 'rahasia', 'terlalu-pendek');
+        app(HybridEncryptionService::class)->encrypt('rahasia', $this->keyId, 'terlalu-pendek');
     }
 
     /** Memastikan payload kompak yang rusak ditolak. */
@@ -96,7 +105,7 @@ class HybridEncryptionTest extends TestCase
     {
         $this->expectException(DecryptionException::class);
 
-        app(HybridEncryptionService::class)->decrypt($this->keyId, 'AHE3.invalid');
+        app(HybridEncryptionService::class)->decrypt('AHE3.invalid');
     }
 
     /** Memastikan command dapat membuat RSA key dan menghasilkan AES generated. */
@@ -119,6 +128,7 @@ class HybridEncryptionTest extends TestCase
             'key_id' => $this->keyId,
             '--aes-source' => 'app_key',
         ])
+            ->expectsQuestion('Konfirmasi timpa key lama. Berapa hasil 2 + 3?', '4')
             ->expectsOutput("Pasangan key untuk key_id [{$this->keyId}] sudah ada.")
             ->expectsOutput('Key lama tidak diubah.')
             ->expectsOutput('Jika memang ingin mengganti key, jalankan ulang dengan --force.')

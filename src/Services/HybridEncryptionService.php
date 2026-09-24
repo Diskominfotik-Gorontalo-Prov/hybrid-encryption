@@ -11,13 +11,14 @@ use JsonException;
 class HybridEncryptionService
 {
     /**
-     * Mengenkripsi data berdasarkan key_id.
+     * Mengenkripsi data dengan key_id opsional.
      *
      * Jika $aesKey kosong, material 32 byte APP_KEY digunakan langsung. Jika diisi,
      * nilainya digunakan sebagai AES key yang diberikan aplikasi.
      */
-    public function encrypt(string $keyId, array|string $data, ?string $aesKey = null): string
+    public function encrypt(array|string $data, string $keyId = 'default', ?string $aesKey = null): string
     {
+        $keyId = $this->normalizeKeyId($keyId);
         try {
             $pem = app(KeyPairService::class)->publicKey($keyId);
         } catch (KeyManagementException $exception) {
@@ -48,13 +49,14 @@ class HybridEncryptionService
     }
 
     /**
-     * Mendekripsi payload berdasarkan key_id.
+     * Mendekripsi payload dengan key_id opsional.
      *
      * $aesKey harus diisi dengan nilai yang sama ketika payload dibuat jika
      * payload menggunakan AES generated/provided.
      */
-    public function decrypt(string $keyId, array|string $payload, ?string $aesKey = null): array|string
+    public function decrypt(array|string $payload, string $keyId = 'default', ?string $aesKey = null): array|string
     {
+        $keyId = $this->normalizeKeyId($keyId);
         $payload = $this->unpackPayload($payload);
 
         try {
@@ -108,7 +110,7 @@ class HybridEncryptionService
     /** Menentukan AES key dari APP_KEY atau dari input aplikasi. */
     private function resolveAesKey(?string $aesKey): string
     {
-        if ($aesKey !== null) {
+        if ($aesKey !== null && trim($aesKey) !== '') {
             return app(AesKeyService::class)->normalize($aesKey);
         }
 
@@ -130,6 +132,12 @@ class HybridEncryptionService
 
         // APP_KEY base64: milik Laravel langsung digunakan sebagai AES-256 key.
         return $material;
+    }
+
+    /** Menggunakan key_id default jika input kosong. */
+    private function normalizeKeyId(string $keyId): string
+    {
+        return trim($keyId) === '' ? 'default' : $keyId;
     }
 
     /**

@@ -11,21 +11,24 @@ use Illuminate\Console\Command;
 /** Command untuk membuat RSA key pair pada satu disk dengan visibility terkonfigurasi. */
 class GenerateKeyPairCommand extends Command
 {
-    protected $signature = 'hybrid-encryption:generate-key-pair {key_id : Identitas key, misalnya users/10/profile} {--force : Timpa key yang sudah ada} {--aes-source= : Sumber AES: app_key atau generated}';
+    protected $signature = 'hybrid-encryption:generate-key-pair {key_id=default : Identitas key, misalnya users/10/profile} {--force : Timpa key yang sudah ada} {--aes-source= : Sumber AES: app_key atau generated}';
     protected $description = 'Membuat RSA key pair dan menentukan sumber AES key berdasarkan key_id';
 
     /** Membuat key pair dan menampilkan lokasi penyimpanannya. */
     public function handle(KeyPairService $keys, HybridEncryptionService $crypto, AesKeyService $aes): int
     {
-        $keyId = (string) $this->argument('key_id');
+        $keyId = trim((string) $this->argument('key_id')) ?: 'default';
 
         try {
             if (!$this->option('force') && $keys->exists($keyId)) {
                 $this->error("Pasangan key untuk key_id [{$keyId}] sudah ada.");
-                $this->line('Key lama tidak diubah.');
-                $this->line('Jika memang ingin mengganti key, jalankan ulang dengan --force.');
+                if ((int) $this->ask('Konfirmasi timpa key lama. Berapa hasil 2 + 3?') !== 5) {
+                    $this->line('Key lama tidak diubah.');
+                    $this->line('Jika memang ingin mengganti key, jalankan ulang dengan --force.');
 
-                return self::FAILURE;
+                    return self::FAILURE;
+                }
+                $this->line('Konfirmasi benar. Key lama akan ditimpa.');
             }
         } catch (KeyManagementException $exception) {
             $this->error($exception->getMessage());

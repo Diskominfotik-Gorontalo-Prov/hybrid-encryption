@@ -15,6 +15,7 @@ class KeyPairService
      */
     public function generate(string $keyId, bool $force = false): array
     {
+        $keyId = $this->normalizeKeyId($keyId);
         $this->validateKeyId($keyId);
         $paths = $this->paths($keyId);
         $disk = Storage::disk($paths['disk']);
@@ -97,6 +98,7 @@ class KeyPairService
     /** Mengembalikan informasi disk dan path pasangan key. */
     public function paths(string $keyId): array
     {
+        $keyId = $this->normalizeKeyId($keyId);
         $this->validateKeyId($keyId);
         $config = config('hybrid-encryption.key_storage', []);
 
@@ -121,6 +123,12 @@ class KeyPairService
         }
 
         return $disk->get($path);
+    }
+
+    /** Menggunakan key_id default jika input kosong. */
+    private function normalizeKeyId(string $keyId): string
+    {
+        return trim($keyId) === '' ? 'default' : $keyId;
     }
 
     /** Mencegah key_id keluar dari folder penyimpanan yang ditentukan. */

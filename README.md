@@ -4,11 +4,48 @@ Package Laravel untuk mengenkripsi payload menggunakan AES-256-GCM dan RSA-OAEP.
 
 ## Alur encrypt dan decrypt
 
+### Flowchart generate key pair
+
+Key pair dapat dibuat melalui Artisan command atau langsung dari controller
+dengan memanggil `KeyPairService`. Keduanya menggunakan service yang sama.
+
+```mermaid
+flowchart TD
+    G0([Mulai generate key pair]) --> G1[Input key_id kosong = default]
+    G1 --> G2{Pemanggil}
+    G2 -->|Artisan| G3[generate-key-pair key_id]
+    G2 -->|Controller| G4[KeyPairService::generate key_id]
+    G3 --> G5[Validasi key_id dan cek key lama]
+    G4 --> G5
+    G5 -->|Belum ada| G8{Sumber AES}
+    G5 -->|Sudah ada| G6{--force aktif?}
+    G6 -->|Ya| G8
+    G6 -->|Tidak| G7[Jawab validasi hitungan 2 + 3]
+    G7 -->|Jawaban salah| G9([Gagal: key lama tidak diubah])
+    G7 -->|Jawaban 5| G8
+    G8 -->|app_key| G10[Gunakan APP_KEY Laravel]
+    G8 -->|generated| G11[AesKeyService membuat AES key 32 byte]
+    G11 --> G12[Simpan AES key oleh aplikasi/secret manager]
+    G10 --> G13[KeyPairService membuat RSA key pair]
+    G12 --> G13
+    G13 --> G14[Simpan public.pem dan private.pem ke disk terkonfigurasi]
+    G14 --> G15[Hitung fingerprint AES]
+    G15 --> G16{Pemanggil}
+    G16 -->|Artisan| G17[Cetak path, fingerprint, dan AES key generated]
+    G16 -->|Controller| G18[Response path, fingerprint, dan AES key generated]
+    G17 --> G19([Selesai])
+    G18 --> G19
+```
+
+`private.pem` tidak dikirim sebagai response. Jika sumber AES `generated`, AES
+key hanya ditampilkan pada hasil generate dan harus langsung diamankan oleh
+aplikasi.
+
 ### Flowchart encrypt
 
 ```mermaid
 flowchart TD
-    E0([Mulai encrypt]) --> E1[Input: key_id dan data asli]
+    E0([Mulai encrypt]) --> E1[Input: data asli, key_id opsional]
     E1 --> E2[KeyPairService membaca public.pem berdasarkan key_id]
     E1 --> E3{Pilih sumber AES key}
     E3 -->|aesKey kosong| E4[Gunakan material 32 byte dari APP_KEY]
@@ -36,7 +73,7 @@ nama field dan metadata tidak terlihat sebagai JSON.
 
 ```mermaid
 flowchart TD
-    D0([Mulai decrypt]) --> D1[Input: key_id dan payload]
+    D0([Mulai decrypt]) --> D1[Input: payload, key_id opsional]
     D1 --> D2[KeyPairService membaca private.pem berdasarkan key_id]
     D1 --> D3[Bongkar string kompak menjadi encrypted_key, iv, tag, data]
     D2 --> D4[RSA-OAEP decrypt]
@@ -150,13 +187,12 @@ Visibility `private` membuat file key tidak ditujukan untuk akses URL publik. Pa
 ```php
 use Aptika\HybridEncryption\Facades\HybridEncryption;
 
-$keyId = 'default';
-$payload = HybridEncryption::encrypt($keyId, [
+$payload = HybridEncryption::encrypt([
     'nik' => '750101xxxxxxxxxx',
     'nama' => 'Alfandy',
 ]);
 
-$data = HybridEncryption::decrypt($keyId, $payload);
+$data = HybridEncryption::decrypt($payload);
 // ['nik' => '750101xxxxxxxxxx', 'nama' => 'Alfandy']
 ```
 
@@ -166,14 +202,14 @@ Untuk AES key hasil generate, berikan key yang sama saat encrypt dan decrypt:
 $aesKey = env('FEATURE_BANTUAN_AES_KEY'); // format base64:... atau 32 byte
 
 $payload = HybridEncryption::encrypt(
-    'features/bantuan',
     'alfandy',
+    'features/bantuan',
     $aesKey
 );
 
 $data = HybridEncryption::decrypt(
-    'features/bantuan',
     $payload,
+    'features/bantuan',
     $aesKey
 );
 ```
@@ -185,20 +221,22 @@ use Aptika\HybridEncryption\Services\HybridEncryptionService;
 
 public function store(HybridEncryptionService $crypto)
 {
-    return response($crypto->encrypt('features/example', ['message' => 'rahasia']))
+    return response($crypto->encrypt(['message' => 'rahasia'], 'features/example'))
         ->header('Content-Type', 'text/plain');
 }
 ```
 
-`encrypt()` menerima `key_id` dan array/string, lalu mengembalikan satu string
-kompak yang dapat dikirim langsung melalui HTTP. `decrypt()` menerima `key_id`
-dan string kompak tersebut, lalu mengembalikan JSON object/array sebagai
+`encrypt()` menerima data sebagai parameter pertama. `key_id` dan `$aesKey`
+bersifat opsional; jika tidak dikirim, masing-masing memakai `default` dan
+`APP_KEY`. Method mengembalikan satu string kompak yang dapat dikirim langsung
+melalui HTTP. `decrypt()` juga menerima payload sebagai parameter pertama, lalu
+mengembalikan JSON object/array sebagai
 associative array; plaintext yang bukan JSON dikembalikan sebagai string.
 
 Contoh mengirim payload sebagai satu string:
 
 ```php
-$payloadString = $crypto->encrypt('integrations/app1', $data);
+$payloadString = $crypto->encrypt($data, 'integrations/app1');
 
 Http::withBody($payloadString, 'text/plain')
     ->post('https://app2.test/api/receive');
@@ -208,8 +246,8 @@ Di aplikasi penerima:
 
 ```php
 $data = $crypto->decrypt(
-    'integrations/app1',
-    $request->getContent()
+    $request->getContent(),
+    'integrations/app1'
 );
 ```
 
@@ -228,8 +266,8 @@ $data = $crypto->decrypt(
    use Aptika\HybridEncryption\Services\HybridEncryptionService;
 
    $payload = app(HybridEncryptionService::class)->encrypt(
-       'features/antar-project',
-       ['nik' => '750101xxxxxxxxxx', 'nama' => 'Alfandy']
+       ['nik' => '750101xxxxxxxxxx', 'nama' => 'Alfandy'],
+       'features/antar-project'
    );
    ```
 
@@ -245,8 +283,8 @@ $data = $crypto->decrypt(
        return response()->json([
            'success' => true,
            'data' => HybridEncryption::decrypt(
-               'features/antar-project',
-               $request->getContent()
+               $request->getContent(),
+               'features/antar-project'
            ),
        ]);
    }
@@ -256,7 +294,8 @@ Public key boleh dibagikan kepada pengirim; private key tidak boleh dibagikan.
 
 ## Key berbeda untuk setiap user atau fitur
 
-Buat key pair menggunakan `key_id` yang stabil dan aman, misalnya:
+`key_id` boleh dikosongkan. Jika kosong, package menggunakan `default`.
+Untuk key khusus user atau fitur, gunakan `key_id` yang stabil dan aman, misalnya:
 
 ```bash
 php artisan hybrid-encryption:generate-key-pair users/10/profile
@@ -287,8 +326,8 @@ Gunakan AES key tersebut saat encrypt dan decrypt:
 ```php
 $aesKey = env('FEATURE_BANTUAN_AES_KEY');
 
-$payload = $crypto->encrypt('features/bantuan', $data, $aesKey);
-$result = $crypto->decrypt('features/bantuan', $payload, $aesKey);
+$payload = $crypto->encrypt($data, 'features/bantuan', $aesKey);
+$result = $crypto->decrypt($payload, 'features/bantuan', $aesKey);
 ```
 
 Command membuat 32 byte acak dengan `random_bytes(32)`, memformatnya sebagai
@@ -296,15 +335,18 @@ Command membuat 32 byte acak dengan `random_bytes(32)`, memformatnya sebagai
 manager atau environment. Jangan menyimpan output tersebut di Git, log,
 response API, atau frontend.
 
-Jika key pair sudah ada, command tidak melempar stack trace. Command menampilkan pesan dan berhenti tanpa mengubah key:
+Jika key pair sudah ada, command meminta validasi hitungan sederhana sebelum
+menimpa key. Jawab `5` untuk pertanyaan `2 + 3`. Jika jawaban salah, key lama
+tetap aman:
 
 ```text
 Pasangan key untuk key_id [default] sudah ada.
+Konfirmasi timpa key lama. Berapa hasil 2 + 3? 4
 Key lama tidak diubah.
 Jika memang ingin mengganti key, jalankan ulang dengan --force.
 ```
 
-Untuk mengganti key secara sadar:
+Untuk mengganti key tanpa pertanyaan, gunakan `--force`:
 
 ```bash
 php artisan hybrid-encryption:generate-key-pair default --force
@@ -313,10 +355,12 @@ php artisan hybrid-encryption:generate-key-pair default --force
 Untuk mencabut dan menghapus public/private key:
 
 ```bash
+php artisan hybrid-encryption:revoke-key-pair
 php artisan hybrid-encryption:revoke-key-pair default
 ```
 
-Command akan meminta konfirmasi. Untuk proses terotomasi:
+Tanpa `key_id`, revoke menggunakan `default`. Tanpa `--force`, command meminta
+validasi hitungan `2 + 3`. Untuk proses terotomasi:
 
 ```bash
 php artisan hybrid-encryption:revoke-key-pair default --force
@@ -340,12 +384,12 @@ use Aptika\HybridEncryption\Services\HybridEncryptionService;
 $crypto = app(HybridEncryptionService::class);
 $keyId = "users/{$user->id}/profile";
 
-$payload = $crypto->encrypt($keyId, [
+$payload = $crypto->encrypt([
     'user_id' => $user->id,
     'email' => $user->email,
-]);
+], $keyId);
 
-$data = $crypto->decrypt($keyId, $payload);
+$data = $crypto->decrypt($payload, $keyId);
 ```
 
 ### Memanggil service dari controller
@@ -367,13 +411,14 @@ public function generate(
     HybridEncryptionService $crypto,
 ) {
     $validated = $request->validate([
-        'key_id' => ['required', 'string', 'max:190'],
+        'key_id' => ['nullable', 'string', 'max:190'],
         'aes_source' => ['nullable', 'in:app_key,generated'],
     ]);
 
+    $keyId = trim((string) ($validated['key_id'] ?? '')) ?: 'default';
     $source = $validated['aes_source'] ?? 'app_key';
     $aesKey = $source === 'generated' ? $aes->generate() : null;
-    $paths = $keys->generate($validated['key_id']);
+    $paths = $keys->generate($keyId);
 
     return response()->json([
         'success' => true,
@@ -495,27 +540,37 @@ Riset dan pemetaan sumber primer yang lebih lengkap tersedia di [docs/security-r
 
 ## Referensi fungsi
 
-### `HybridEncryptionService::encrypt(string $keyId, array|string $data, ?string $aesKey = null): string`
+### `HybridEncryptionService::encrypt(array|string $data, string $keyId = 'default', ?string $aesKey = null): string`
 
-Mengenkripsi array atau string menggunakan public key yang disimpan untuk `$keyId`. Jika `$aesKey` kosong, material `APP_KEY` yang sudah di-decode digunakan sebagai AES key; jika diisi, key tersebut digunakan. IV dibuat acak untuk setiap payload, plaintext dienkripsi dengan AES-GCM, lalu AES key dibungkus memakai RSA-OAEP.
+Mengenkripsi array atau string menggunakan public key yang disimpan untuk
+`$keyId`. Data adalah parameter pertama. Jika `$keyId` kosong atau tidak dikirim,
+digunakan `default`. Jika `$aesKey` kosong atau
+tidak dikirim, material `APP_KEY` yang sudah di-decode digunakan sebagai AES
+key. Jika `$aesKey` diisi, key tersebut digunakan. IV dibuat acak untuk setiap
+payload, plaintext dienkripsi dengan AES-GCM, lalu AES key dibungkus memakai
+RSA-OAEP.
 
 Mengembalikan satu string kompak berawalan `AHE3.`. Komponen kriptografis
 dikemas di dalam string tersebut tanpa metadata JSON yang terlihat. Method
 melempar `EncryptionException` bila public key tidak ditemukan/tidak valid,
 pembuatan JSON array gagal, atau proses AES/RSA gagal.
 
-### `HybridEncryptionService::decrypt(string $keyId, array|string $payload, ?string $aesKey = null): array|string`
+### `HybridEncryptionService::decrypt(array|string $payload, string $keyId = 'default', ?string $aesKey = null): array|string`
 
-Membongkar string kompak, membuka kunci AES menggunakan private key untuk
-`$keyId`, lalu mendekripsi data dengan AES-GCM. Format array atau string JSON
-lama masih dapat dibaca untuk kompatibilitas. Jika payload dibuat dengan AES
-generated, `$aesKey` yang sama wajib diberikan.
+Membongkar string kompak dari parameter pertama, membuka kunci AES menggunakan
+private key untuk `$keyId` atau `default` jika kosong, lalu mendekripsi data
+dengan AES-GCM. Jika
+`$aesKey` kosong atau tidak dikirim, decrypt menggunakan `APP_KEY`. Format array
+atau string JSON lama masih dapat dibaca untuk kompatibilitas. Jika payload
+dibuat dengan AES generated, `$aesKey` yang sama wajib diberikan.
 
 Melempar `DecryptionException` bila field wajib tidak valid, private key gagal dibuka, Base64 tidak valid, RSA gagal, atau authentication tag AES tidak cocok.
 
 ### `KeyPairService::generate(string $keyId, bool $force = false): array`
 
-Membuat RSA public/private key pair dan menyimpannya pada disk serta prefix yang dikonfigurasi. Secara default command menolak menimpa key yang sudah ada. `force` hanya digunakan untuk rotasi key yang terencana.
+Membuat RSA public/private key pair dan menyimpannya pada disk serta prefix yang
+dikonfigurasi. Jika `$keyId` kosong, digunakan `default`. Parameter `$force`
+digunakan untuk menimpa key lama saat rotasi yang terencana.
 
 ### `KeyPairService::publicKey(string $keyId): string` dan `privateKey(string $keyId): string`
 
@@ -551,11 +606,18 @@ Menghapus public dan private key untuk `key_id`. Gunakan melalui command revoke 
 
 ### `GenerateKeyPairCommand::handle(KeyPairService $keys, HybridEncryptionService $crypto): int`
 
-Menjalankan pembuatan key pair berbasis key ID melalui command `hybrid-encryption:generate-key-pair`. Command bertanya apakah memakai `APP_KEY` atau membuat AES key generated. AES generated ditampilkan satu kali, tidak disimpan package, dan harus diamankan oleh pengguna. Command juga menampilkan disk, path public/private key, dan fingerprint AES.
+Menjalankan pembuatan key pair berbasis key ID melalui command
+`hybrid-encryption:generate-key-pair`. Jika `key_id` tidak diberikan, digunakan
+`default`. Command bertanya apakah memakai `APP_KEY` atau membuat AES key
+generated. Saat key lama ditemukan, command meminta hasil hitungan `2 + 3` untuk
+konfirmasi timpa; `--force` melewati validasi tersebut. AES generated ditampilkan
+satu kali, tidak disimpan package, dan harus diamankan oleh pengguna.
 
 ### `RevokeKeyPairCommand::handle(KeyPairService $keys): int`
 
-Mencabut dan menghapus public/private key berdasarkan `key_id` setelah konfirmasi. Opsi `--force` melewati konfirmasi dan hanya boleh digunakan pada proses terkontrol.
+Mencabut dan menghapus public/private key berdasarkan `key_id`, atau `default`
+jika tidak diberikan. Tanpa `--force`, command meminta hasil hitungan `2 + 3`.
+Opsi `--force` melewati validasi dan hanya boleh digunakan pada proses terkontrol.
 
 ### `HybridEncryptionService::b64(string $value): string`
 
@@ -589,7 +651,7 @@ Jangan kirim detail path key atau exception mentah ke client:
 use Aptika\HybridEncryption\Exceptions\DecryptionException;
 
 try {
-    $data = HybridEncryption::decrypt('features/example', $request->all());
+    $data = HybridEncryption::decrypt($request->getContent(), 'features/example');
 } catch (DecryptionException $exception) {
     report($exception);
 
