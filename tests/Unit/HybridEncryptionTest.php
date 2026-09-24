@@ -38,6 +38,8 @@ class HybridEncryptionTest extends TestCase
         $payload = $service->encrypt($this->keyId, $original);
 
         $this->assertSame('app_key', $payload['aes_source']);
+        $appKeyMaterial = base64_decode(substr((string) config('app.key'), 7), true);
+        $this->assertSame(hash('sha256', $appKeyMaterial), $service->aesKeyFingerprint());
         $this->assertSame($original, $service->decrypt($this->keyId, $payload));
     }
 

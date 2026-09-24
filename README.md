@@ -357,16 +357,16 @@ RSA-3072 dan AES-256 merupakan pilihan kuat untuk banyak aplikasi saat ini jika 
 
 ### Sumber AES key pada package ini
 
-Jika `$aesKey` kosong, package menurunkan AES-256 key dari `APP_KEY` Laravel menggunakan SHA-256 dengan konteks package. Jika `$aesKey` diberikan, package memakai AES key 32 byte tersebut. AES key tidak dikirim sebagai plaintext di payload; RSA membungkus AES key ke field `encrypted_key`.
+Jika `$aesKey` kosong, package menggunakan material `APP_KEY` Laravel sebagai AES-256 key. Untuk format `APP_KEY=base64:...`, prefix `base64:` dihapus lalu nilainya di-decode; hasilnya harus 32 byte. Jika `$aesKey` diberikan, package memakai AES key 32 byte tersebut. AES key tidak dikirim sebagai plaintext di payload; RSA membungkus AES key ke field `encrypted_key`.
 
 - Mode `app_key` pada App1 dan App2 harus memakai `APP_KEY` yang sama.
 - Mode `generated` pada App1 dan App2 harus memakai AES key generated yang sama.
-- Jangan mencatat AES key generated atau `APP_KEY` ke log.
+- Jangan mencatat AES key generated atau `APP_KEY` ke log. Fingerprint AES adalah hash untuk verifikasi dan memang tidak sama dengan nilai `APP_KEY`.
 - Mengganti `APP_KEY` membuat payload mode `app_key` lama tidak dapat didekripsi.
 - Siapa pun yang memperoleh `APP_KEY` dan private RSA key dapat mencoba membuka payload yang ditujukan kepada aplikasi tersebut.
 - Karena `APP_KEY` juga merupakan root key Laravel, kompromi `APP_KEY` dapat berdampak pada fungsi Laravel lain yang menggunakannya. Simpan secret ini di secret manager atau environment yang terlindungi.
 
-Catatan implementasi: proses SHA-256 di sini adalah derivasi deterministik untuk mode `app_key`, bukan password KDF seperti Argon2 atau scrypt. `APP_KEY` harus dibuat oleh Laravel secara acak dan tidak boleh berupa password buatan manusia. Mode `generated` menggunakan 32 byte acak dan tidak disimpan oleh package.
+Catatan implementasi: mode `app_key` menggunakan langsung hasil decode `APP_KEY`; ini bukan password KDF seperti Argon2 atau scrypt. `APP_KEY` harus dibuat oleh Laravel secara acak dan tidak boleh berupa password buatan manusia. Mode `generated` menggunakan 32 byte acak dan tidak disimpan oleh package.
 
 ### Batasan keamanan yang perlu ditangani aplikasi
 
@@ -384,7 +384,7 @@ Riset dan pemetaan sumber primer yang lebih lengkap tersedia di [docs/security-r
 
 ### `HybridEncryptionService::encrypt(string $keyId, array|string $data, ?string $aesKey = null): array`
 
-Mengenkripsi array atau string menggunakan public key yang disimpan untuk `$keyId`. Jika `$aesKey` kosong, AES key diturunkan dari `APP_KEY`; jika diisi, key tersebut digunakan. IV dibuat acak untuk setiap payload, plaintext dienkripsi dengan AES-GCM, lalu AES key dibungkus memakai RSA-OAEP.
+Mengenkripsi array atau string menggunakan public key yang disimpan untuk `$keyId`. Jika `$aesKey` kosong, material `APP_KEY` yang sudah di-decode digunakan sebagai AES key; jika diisi, key tersebut digunakan. IV dibuat acak untuk setiap payload, plaintext dienkripsi dengan AES-GCM, lalu AES key dibungkus memakai RSA-OAEP.
 
 Melempar `EncryptionException` bila public key tidak ditemukan/tidak valid, pembuatan JSON array gagal, atau proses AES/RSA gagal.
 

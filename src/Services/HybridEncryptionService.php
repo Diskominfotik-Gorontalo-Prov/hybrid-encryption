@@ -144,7 +144,12 @@ class HybridEncryptionService
             throw new EncryptionException('Format APP_KEY Laravel tidak valid.');
         }
 
-        return hash('sha256', 'aptika-hybrid-encryption|aes-key|' . $material, true);
+        if (strlen($material) !== 32) {
+            throw new EncryptionException('APP_KEY harus menghasilkan 32 byte untuk AES-256.');
+        }
+
+        // APP_KEY base64: milik Laravel langsung digunakan sebagai AES-256 key.
+        return $material;
     }
 
     /** Mengubah AES key base64: atau 32 byte mentah menjadi key AES-256. */

@@ -17,7 +17,7 @@ Menurut source code plugin saat ini:
 | Komponen | Perilaku plugin | Catatan keamanan |
 | --- | --- | --- |
 | Enkripsi data | `aes-256-gcm` melalui `openssl_encrypt` | AES-GCM menyediakan kerahasiaan dan authentication tag untuk mendeteksi perubahan payload. |
-| Kunci AES | Default: hasil `SHA-256` atas `APP_KEY` dan label internal plugin. Override: AES key 32 byte yang diberikan aplikasi. | Derivasi APP_KEY adalah mekanisme khusus plugin, bukan mekanisme `APP_KEY` Laravel yang otomatis menjadi AES-GCM key. Mode override mengharuskan kedua aplikasi memakai AES key generated yang sama. |
+| Kunci AES | Default: material 32 byte hasil decode `APP_KEY=base64:...`. Override: AES key 32 byte yang diberikan aplikasi. | Mode default menggunakan langsung material `APP_KEY` untuk AES-256; mode override mengharuskan kedua aplikasi memakai AES key generated yang sama. |
 | IV GCM | `random_bytes(12)` pada setiap payload | 12 byte adalah IV 96-bit. IV tidak rahasia dan harus ikut dikirim bersama ciphertext. Pengulangan IV dengan key GCM yang sama harus dihindari. |
 | Pembungkusan kunci AES | RSA dengan `OPENSSL_PKCS1_OAEP_PADDING` | RSA hanya membungkus kunci AES, bukan seluruh data. Digest OAEP tidak dipilih eksplisit oleh kode saat ini; parameter aktual perlu diverifikasi terhadap versi OpenSSL/PHP yang digunakan. |
 | RSA default | 3072 bit dari konfigurasi plugin | Berdasarkan tabel NIST, RSA 3072-bit dipetakan ke sekitar 128-bit security strength. |
@@ -120,10 +120,10 @@ Sumber primer:
 
 Dokumentasi PHP menyatakan bahwa parameter `passphrase` pada
 `openssl_encrypt` **bukan key derivation function**. Jika panjangnya tidak
-sesuai, OpenSSL akan melakukan padding NUL atau pemotongan. Plugin karena itu
-tidak menyerahkan nilai teks `APP_KEY` mentah sebagai kunci AES; plugin terlebih
-dahulu mendecode format `base64:` Laravel bila ada, lalu melakukan hash SHA-256
-dengan label internal untuk menghasilkan 32 byte.
+sesuai, OpenSSL akan melakukan padding NUL atau pemotongan. Plugin tidak
+menyerahkan teks `APP_KEY=base64:...` mentah; plugin mendecode prefix `base64:`
+dan mensyaratkan hasilnya berukuran 32 byte untuk AES-256. Pada mode generated,
+plugin menerima AES key 32 byte dari aplikasi.
 
 Dokumentasi PHP juga mendokumentasikan bahwa mode AEAD seperti GCM menghasilkan
 authentication tag melalui parameter by-reference, dan bahwa IV serta tag harus
@@ -143,13 +143,12 @@ pada konfigurasi `app.key`, yang biasanya berasal dari `APP_KEY`, dan bahwa
 Dokumentasi Laravel juga menjelaskan cipher Laravel dan integritas nilai yang
 dienkripsi oleh encrypter Laravel.
 
-Namun plugin ini bukan `Crypt` facade Laravel. Plugin memiliki derivasi sendiri:
+Namun plugin ini bukan `Crypt` facade Laravel. Plugin memiliki normalisasi key sendiri:
 
 ```text
 APP_KEY Laravel
   -> hapus prefix base64: bila ada
-  -> SHA-256(label internal + material APP_KEY)
-  -> 32 byte AES key untuk AES-256-GCM
+  -> 32 byte material AES key untuk AES-256-GCM
 ```
 
 Jika aplikasi memberikan `$aesKey`, alur tersebut diganti dengan validasi AES
@@ -159,7 +158,7 @@ sama harus dikelola dan diberikan kembali saat decrypt.
 Konsekuensinya:
 
 1. Mode `app_key` pada App1 dan App2 yang harus saling bertukar payload harus
-   memakai nilai `APP_KEY` yang sama persis dan konfigurasi derivasi yang sama.
+   memakai nilai `APP_KEY` yang sama persis dan format AES yang sama.
 2. Mode `generated` harus memakai AES key generated yang sama pada App1 dan App2.
 3. Mengganti `APP_KEY` membuat AES key mode `app_key` berubah. Payload lama tidak
    dapat didekripsi dengan key hasil derivasi baru.
@@ -201,8 +200,9 @@ Klaim berikut tidak boleh dibuat tanpa perubahan dan audit tambahan:
   management serta runtime.
 - “RSA-OAEP-SHA-256.” Source code saat ini tidak memilih digest OAEP secara
   eksplisit.
-- “APP_KEY adalah AES key Laravel.” Plugin menurunkan key baru dengan SHA-256;
-  ini bukan perilaku otomatis Laravel Encrypter.
+- “APP_KEY adalah AES key Laravel.” Plugin ini menggunakan material 32 byte hasil
+  decode `APP_KEY=base64:...` sebagai AES key, tetapi bukan melalui Laravel
+  Encrypter dan tidak berlaku untuk semua cipher/ukuran key Laravel.
 - “Payload membuktikan identitas App1.” Enkripsi dan authentication tag tidak
   otomatis menyediakan autentikasi identitas pengirim. Gunakan TLS, autentikasi
   API, tanda tangan digital, atau mekanisme identitas yang sesuai kebutuhan.

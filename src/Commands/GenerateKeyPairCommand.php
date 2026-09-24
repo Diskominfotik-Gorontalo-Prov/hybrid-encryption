@@ -51,6 +51,8 @@ class GenerateKeyPairCommand extends Command
         if ($aesKey !== null) {
             $this->warn('Simpan AES key ini di secret manager/environment. Package tidak menyimpannya.');
             $this->line("AES key: {$aesKey}");
+        } else {
+            $this->line('AES key: menggunakan APP_KEY Laravel (nilai tidak ditampilkan).');
         }
         $this->warn('Jangan membagikan private key atau commit file tersebut ke Git.');
 
