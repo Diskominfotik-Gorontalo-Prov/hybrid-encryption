@@ -13,10 +13,10 @@ class HybridEncryptionService
     /**
      * Mengenkripsi data berdasarkan key_id.
      *
-     * Jika $aesKey kosong, AES key diturunkan dari APP_KEY Laravel. Jika diisi,
+     * Jika $aesKey kosong, material 32 byte APP_KEY digunakan langsung. Jika diisi,
      * nilainya digunakan sebagai AES key yang diberikan aplikasi.
      */
-    public function encrypt(string $keyId, array|string $data, ?string $aesKey = null): array
+    public function encrypt(string $keyId, array|string $data, ?string $aesKey = null): string
     {
         try {
             $pem = app(KeyPairService::class)->publicKey($keyId);
@@ -44,38 +44,18 @@ class HybridEncryptionService
             throw new EncryptionException('RSA encryption untuk AES key gagal.');
         }
 
-        return [
-            'version' => 3,
-            'alg' => 'RSA-OAEP+A256GCM',
-            'aes_source' => $aesKey === null ? 'app_key' : 'provided',
-            'encrypted_key' => base64_encode($encryptedKey),
-            'iv' => base64_encode($iv),
-            'tag' => base64_encode($tag),
-            'data' => base64_encode($ciphertext),
-        ];
+        return $this->packCompactPayload($encryptedKey, $iv, $tag, $ciphertext);
     }
 
     /**
      * Mendekripsi payload berdasarkan key_id.
      *
      * $aesKey harus diisi dengan nilai yang sama ketika payload dibuat jika
-     * payload menggunakan sumber AES generated/provided.
+     * payload menggunakan AES generated/provided.
      */
     public function decrypt(string $keyId, array|string $payload, ?string $aesKey = null): array|string
     {
-        if (is_string($payload)) {
-            try {
-                $payload = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
-            } catch (JsonException) {
-                throw new DecryptionException('Payload JSON tidak valid.');
-            }
-
-            if (!is_array($payload)) {
-                throw new DecryptionException('Payload JSON harus berupa object.');
-            }
-        }
-
-        $this->validatePayload($payload);
+        $payload = $this->unpackPayload($payload);
 
         try {
             $pem = app(KeyPairService::class)->privateKey($keyId);
@@ -88,10 +68,10 @@ class HybridEncryptionService
             throw new DecryptionException('Private key tidak valid.');
         }
 
-        $encryptedKey = $this->b64($payload['encrypted_key']);
-        $iv = $this->b64($payload['iv']);
-        $tag = $this->b64($payload['tag']);
-        $ciphertext = $this->b64($payload['data']);
+        $encryptedKey = $payload['encrypted_key'];
+        $iv = $payload['iv'];
+        $tag = $payload['tag'];
+        $ciphertext = $payload['data'];
         if (!openssl_private_decrypt($encryptedKey, $recoveredAesKey, $privateKey, OPENSSL_PKCS1_OAEP_PADDING)) {
             throw new DecryptionException('RSA decrypt AES key gagal.');
         }
@@ -152,7 +132,103 @@ class HybridEncryptionService
         return $material;
     }
 
-    /** Memastikan semua field payload binary tersedia. */
+    /**
+     * Membungkus komponen wajib menjadi satu string opaque.
+     *
+     * Nama field dan metadata tidak dikirim sebagai JSON. Panjang setiap
+     * komponen disimpan sebagai unsigned 32-bit integer agar payload dapat
+     * dibongkar kembali tanpa separator yang bisa ambigu.
+     */
+    private function packCompactPayload(string $encryptedKey, string $iv, string $tag, string $ciphertext): string
+    {
+        $binary = pack('N', strlen($encryptedKey)) . $encryptedKey
+            . pack('N', strlen($iv)) . $iv
+            . pack('N', strlen($tag)) . $tag
+            . $ciphertext;
+
+        return 'AHE3.' . rtrim(strtr(base64_encode($binary), '+/', '-_'), '=');
+    }
+
+    /** Mengubah payload kompak atau format JSON lama menjadi komponen binary. */
+    private function unpackPayload(array|string $payload): array
+    {
+        if (is_string($payload) && str_starts_with($payload, 'AHE3.')) {
+            return $this->unpackCompactPayload($payload);
+        }
+
+        if (is_string($payload)) {
+            try {
+                $payload = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+            } catch (JsonException) {
+                throw new DecryptionException('Payload harus berupa string kompak yang valid.');
+            }
+
+            if (!is_array($payload)) {
+                throw new DecryptionException('Payload JSON harus berupa object.');
+            }
+        }
+
+        $this->validatePayload($payload);
+
+        return [
+            'encrypted_key' => $this->b64($payload['encrypted_key']),
+            'iv' => $this->b64($payload['iv']),
+            'tag' => $this->b64($payload['tag']),
+            'data' => $this->b64($payload['data']),
+        ];
+    }
+
+    /** Membongkar format AHE3 berdasarkan panjang komponen binary. */
+    private function unpackCompactPayload(string $payload): array
+    {
+        $encoded = substr($payload, 5);
+        if ($encoded === '') {
+            throw new DecryptionException('Payload kompak tidak valid.');
+        }
+        $encoded .= str_repeat('=', (4 - strlen($encoded) % 4) % 4);
+        $binary = base64_decode(strtr($encoded, '-_', '+/'), true);
+        if ($binary === false) {
+            throw new DecryptionException('Payload kompak tidak valid.');
+        }
+
+        $offset = 0;
+        $encryptedKey = $this->readCompactPart($binary, $offset, 'encrypted_key');
+        $iv = $this->readCompactPart($binary, $offset, 'iv');
+        $tag = $this->readCompactPart($binary, $offset, 'tag');
+        $data = substr($binary, $offset);
+
+        if ($data === false || $encryptedKey === '' || $iv === '' || $tag === '') {
+            throw new DecryptionException('Payload kompak tidak lengkap.');
+        }
+
+        return [
+            'encrypted_key' => $encryptedKey,
+            'iv' => $iv,
+            'tag' => $tag,
+            'data' => $data,
+        ];
+    }
+
+    /** Membaca satu bagian binary yang diawali panjang 32-bit. */
+    private function readCompactPart(string $binary, int &$offset, string $field): string
+    {
+        if (strlen($binary) - $offset < 4) {
+            throw new DecryptionException("Payload kompak tidak memiliki panjang {$field}.");
+        }
+
+        $length = unpack('Nlength', substr($binary, $offset, 4))['length'];
+        $offset += 4;
+        if ($length < 1 || strlen($binary) - $offset < $length) {
+            throw new DecryptionException("Bagian {$field} pada payload kompak tidak valid.");
+        }
+
+        $value = substr($binary, $offset, $length);
+        $offset += $length;
+
+        return $value;
+    }
+
+    /** Memastikan semua field payload JSON lama tersedia. */
     private function validatePayload(array $payload): void
     {
         foreach (['encrypted_key', 'iv', 'tag', 'data'] as $field) {

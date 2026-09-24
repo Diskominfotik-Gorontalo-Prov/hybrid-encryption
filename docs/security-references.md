@@ -21,7 +21,7 @@ Menurut source code plugin saat ini:
 | IV GCM | `random_bytes(12)` pada setiap payload | 12 byte adalah IV 96-bit. IV tidak rahasia dan harus ikut dikirim bersama ciphertext. Pengulangan IV dengan key GCM yang sama harus dihindari. |
 | Pembungkusan kunci AES | RSA dengan `OPENSSL_PKCS1_OAEP_PADDING` | RSA hanya membungkus kunci AES, bukan seluruh data. Digest OAEP tidak dipilih eksplisit oleh kode saat ini; parameter aktual perlu diverifikasi terhadap versi OpenSSL/PHP yang digunakan. |
 | RSA default | 3072 bit dari konfigurasi plugin | Berdasarkan tabel NIST, RSA 3072-bit dipetakan ke sekitar 128-bit security strength. |
-| Payload | `encrypted_key`, `iv`, `tag`, dan `data` dalam Base64, serta `aes_source` sebagai metadata | Base64 hanya encoding, bukan enkripsi tambahan. `aes_source` tidak berisi AES key. |
+| Payload | String kompak berawalan `AHE3.` yang memuat `encrypted_key`, `iv`, `tag`, dan `data` | Nama field dan metadata tidak dikirim sebagai JSON. Komponen kriptografis tetap wajib tersedia saat decrypt. |
 
 ## Apa arti “tingkat keamanan”
 

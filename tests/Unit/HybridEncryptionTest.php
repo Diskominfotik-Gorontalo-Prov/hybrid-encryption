@@ -31,28 +31,31 @@ class HybridEncryptionTest extends TestCase
         app(KeyPairService::class)->generate($this->keyId);
     }
 
-    /** Memastikan array memakai AES hasil derivasi APP_KEY. */
+    /** Memastikan array memakai AES APP_KEY dan menghasilkan string kompak. */
     public function test_encrypt_and_decrypt_with_app_key(): void
     {
         $service = app(HybridEncryptionService::class);
         $original = ['user_id' => 10, 'secret' => 'rahasia'];
         $payload = $service->encrypt($this->keyId, $original);
 
-        $this->assertSame('app_key', $payload['aes_source']);
+        $this->assertIsString($payload);
+        $this->assertStringStartsWith('AHE3.', $payload);
+        $this->assertStringNotContainsString('encrypted_key', $payload);
+        $this->assertStringNotContainsString('aes_source', $payload);
         $appKeyMaterial = base64_decode(substr((string) config('app.key'), 7), true);
         $this->assertSame(hash('sha256', $appKeyMaterial), $service->aesKeyFingerprint());
         $this->assertSame($original, $service->decrypt($this->keyId, $payload));
     }
 
-    /** Memastikan string JSON dari payload dapat langsung didekripsi. */
-    public function test_payload_json_string_can_be_decrypted(): void
+    /** Memastikan string kompak dapat langsung didekripsi. */
+    public function test_compact_payload_string_can_be_decrypted(): void
     {
         $service = app(HybridEncryptionService::class);
         $payload = $service->encrypt($this->keyId, 'alfandy');
 
         $this->assertSame('alfandy', $service->decrypt(
             $this->keyId,
-            json_encode($payload, JSON_THROW_ON_ERROR)
+            $payload
         ));
     }
 
@@ -64,7 +67,7 @@ class HybridEncryptionTest extends TestCase
         $original = ['feature' => 'bantuan', 'enabled' => true];
         $payload = $service->encrypt($this->keyId, $original, $aesKey);
 
-        $this->assertSame('provided', $payload['aes_source']);
+        $this->assertIsString($payload);
         $this->assertSame($original, $service->decrypt($this->keyId, $payload, $aesKey));
     }
 
@@ -86,6 +89,14 @@ class HybridEncryptionTest extends TestCase
         $this->expectException(EncryptionException::class);
 
         app(HybridEncryptionService::class)->encrypt($this->keyId, 'rahasia', 'terlalu-pendek');
+    }
+
+    /** Memastikan payload kompak yang rusak ditolak. */
+    public function test_malformed_compact_payload_is_rejected(): void
+    {
+        $this->expectException(DecryptionException::class);
+
+        app(HybridEncryptionService::class)->decrypt($this->keyId, 'AHE3.invalid');
     }
 
     /** Memastikan command dapat membuat RSA key dan menghasilkan AES generated. */

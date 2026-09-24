@@ -11,7 +11,7 @@ flowchart TD
     E0([Mulai encrypt]) --> E1[Input: key_id dan data asli]
     E1 --> E2[KeyPairService membaca public.pem berdasarkan key_id]
     E1 --> E3{Pilih sumber AES key}
-    E3 -->|aesKey kosong| E4[Derivasi AES-256 key dari APP_KEY]
+    E3 -->|aesKey kosong| E4[Gunakan material 32 byte dari APP_KEY]
     E3 -->|aesKey diberikan| E5[Validasi AES key 32 byte]
     E1 --> E6[Buat IV acak 12 byte]
     E4 --> E7[AES-GCM encrypt]
@@ -25,10 +25,12 @@ flowchart TD
     E8 --> E11[Gabungkan payload]
     E10 --> E11
     E6 --> E11
-    E11 --> E12([Payload JSON dikirim])
+    E11 --> E12([Satu string kompak dikirim])
 ```
 
-Hasil encrypt tidak menyimpan data asli. Payload hanya berisi `encrypted_key`, `iv`, `tag`, dan `data`.
+Hasil encrypt tidak menyimpan data asli. Hasilnya adalah satu string kompak berawalan
+`AHE3.`. Di dalamnya tetap terdapat `encrypted_key`, `iv`, `tag`, dan `data`, tetapi
+nama field dan metadata tidak terlihat sebagai JSON.
 
 ### Flowchart decrypt
 
@@ -36,12 +38,12 @@ Hasil encrypt tidak menyimpan data asli. Payload hanya berisi `encrypted_key`, `
 flowchart TD
     D0([Mulai decrypt]) --> D1[Input: key_id dan payload]
     D1 --> D2[KeyPairService membaca private.pem berdasarkan key_id]
-    D1 --> D3[Ambil encrypted_key dari payload]
+    D1 --> D3[Bongkar string kompak menjadi encrypted_key, iv, tag, data]
     D2 --> D4[RSA-OAEP decrypt]
     D3 --> D4
     D4 --> D5[AES key dari payload]
     D1 --> D6{AES key diberikan?}
-    D6 -->|Tidak| D7[Derivasi AES-256 key dari APP_KEY]
+    D6 -->|Tidak| D7[Gunakan material 32 byte dari APP_KEY]
     D6 -->|Ya| D10[Validasi AES key 32 byte]
     D5 --> D8{AES key sama?}
     D7 --> D8
@@ -183,19 +185,22 @@ use Aptika\HybridEncryption\Services\HybridEncryptionService;
 
 public function store(HybridEncryptionService $crypto)
 {
-    return response()->json($crypto->encrypt('features/example', ['message' => 'rahasia']));
+    return response($crypto->encrypt('features/example', ['message' => 'rahasia']))
+        ->header('Content-Type', 'text/plain');
 }
 ```
 
-`encrypt()` menerima `key_id` dan array/string. Hasilnya berupa array payload yang dapat dikirim langsung oleh Laravel atau diubah menjadi satu string JSON. `decrypt()` menerima `key_id` dan payload dalam bentuk array atau string JSON, lalu mengembalikan JSON object/array sebagai associative array; plaintext yang bukan JSON dikembalikan sebagai string.
+`encrypt()` menerima `key_id` dan array/string, lalu mengembalikan satu string
+kompak yang dapat dikirim langsung melalui HTTP. `decrypt()` menerima `key_id`
+dan string kompak tersebut, lalu mengembalikan JSON object/array sebagai
+associative array; plaintext yang bukan JSON dikembalikan sebagai string.
 
 Contoh mengirim payload sebagai satu string:
 
 ```php
-$payloadArray = $crypto->encrypt('integrations/app1', $data);
-$payloadString = json_encode($payloadArray, JSON_THROW_ON_ERROR);
+$payloadString = $crypto->encrypt('integrations/app1', $data);
 
-Http::withBody($payloadString, 'application/json')
+Http::withBody($payloadString, 'text/plain')
     ->post('https://app2.test/api/receive');
 ```
 
@@ -239,7 +244,10 @@ $data = $crypto->decrypt(
    {
        return response()->json([
            'success' => true,
-           'data' => HybridEncryption::decrypt('features/antar-project', $request->all()),
+           'data' => HybridEncryption::decrypt(
+               'features/antar-project',
+               $request->getContent()
+           ),
        ]);
    }
    ```
@@ -340,6 +348,56 @@ $payload = $crypto->encrypt($keyId, [
 $data = $crypto->decrypt($keyId, $payload);
 ```
 
+### Memanggil service dari controller
+
+Selain melalui Artisan, pasangan RSA dapat dibuat langsung dari controller
+menggunakan `KeyPairService`. Contoh berikut membuat key pair dengan sumber AES
+`app_key` atau `generated` berdasarkan request:
+
+```php
+use Aptika\HybridEncryption\Services\AesKeyService;
+use Aptika\HybridEncryption\Services\HybridEncryptionService;
+use Aptika\HybridEncryption\Services\KeyPairService;
+use Illuminate\Http\Request;
+
+public function generate(
+    Request $request,
+    KeyPairService $keys,
+    AesKeyService $aes,
+    HybridEncryptionService $crypto,
+) {
+    $validated = $request->validate([
+        'key_id' => ['required', 'string', 'max:190'],
+        'aes_source' => ['nullable', 'in:app_key,generated'],
+    ]);
+
+    $source = $validated['aes_source'] ?? 'app_key';
+    $aesKey = $source === 'generated' ? $aes->generate() : null;
+    $paths = $keys->generate($validated['key_id']);
+
+    return response()->json([
+        'success' => true,
+        'key_id' => $paths['key_id'],
+        'disk' => $paths['disk'],
+        'visibility' => $paths['visibility'],
+        'public_path' => $paths['public_path'],
+        'private_path' => $paths['private_path'],
+        'aes_source' => $source,
+        'aes_fingerprint' => $crypto->aesKeyFingerprint($aesKey),
+        // Hanya dikembalikan untuk generated dan harus langsung diamankan.
+        'aes_key' => $aesKey,
+    ]);
+}
+```
+
+Catatan keamanan:
+
+- Endpoint ini harus dibatasi untuk administrator atau proses internal.
+- Jangan mengembalikan isi private key pada response.
+- `aes_key` generated hanya ditampilkan sekali dan harus disimpan pada secret manager.
+- Jika key sudah ada, `generate()` melempar `KeyManagementException`. Gunakan
+  `generate($keyId, true)` hanya untuk rotasi key yang sudah direncanakan.
+
 API key pair yang tersedia:
 
 ```php
@@ -355,29 +413,25 @@ $privatePem = $keys->privateKey('users/10/profile');
 
 ## Bentuk payload
 
-```json
-{
-  "version": 3,
-  "alg": "RSA-OAEP+A256GCM",
-  "aes_source": "app_key",
-  "encrypted_key": "base64...",
-  "iv": "base64...",
-  "tag": "base64...",
-  "data": "base64..."
-}
+```text
+AHE3.<base64url dari envelope binary>
 ```
 
-| Field | Keterangan |
-| --- | --- |
-| `version` | Versi format payload, saat ini `3`. |
-| `alg` | Penanda kombinasi algoritma. |
-| `aes_source` | Informasi sumber AES: `app_key` atau `provided`; bukan AES key. |
-| `encrypted_key` | Kunci AES yang dienkripsi RSA-OAEP. |
-| `iv` | Initialization vector AES-GCM 12 byte, dalam Base64. |
-| `tag` | Authentication tag AES-GCM, dalam Base64. |
-| `data` | Ciphertext payload, dalam Base64. |
+`encrypt()` mengembalikan string opaque, bukan array JSON. Format internalnya
+menyimpan komponen berikut secara berurutan:
 
-Semua field selain `version` dan `alg` wajib ada saat decrypt. Payload yang diubah atau Base64-nya tidak valid akan ditolak.
+| Komponen internal | Keterangan |
+| --- | --- |
+| `encrypted_key` | Kunci AES yang dienkripsi RSA-OAEP. |
+| `iv` | Initialization vector AES-GCM 12 byte. |
+| `tag` | Authentication tag AES-GCM. |
+| `data` | Ciphertext payload. |
+
+`AHE3` adalah penanda format internal. `version`, `alg`, dan `aes_source` tidak
+lagi dikirim sebagai metadata JSON. Penghapusan nama metadata tidak menghapus
+komponen kriptografis: `iv` dan `tag` wajib untuk AES-GCM, sedangkan
+`encrypted_key` wajib untuk membuka AES key dengan RSA. String yang terpotong,
+diubah, atau tidak valid akan ditolak.
 
 ## Penjelasan algoritma dan tingkat keamanan
 
@@ -441,15 +495,21 @@ Riset dan pemetaan sumber primer yang lebih lengkap tersedia di [docs/security-r
 
 ## Referensi fungsi
 
-### `HybridEncryptionService::encrypt(string $keyId, array|string $data, ?string $aesKey = null): array`
+### `HybridEncryptionService::encrypt(string $keyId, array|string $data, ?string $aesKey = null): string`
 
 Mengenkripsi array atau string menggunakan public key yang disimpan untuk `$keyId`. Jika `$aesKey` kosong, material `APP_KEY` yang sudah di-decode digunakan sebagai AES key; jika diisi, key tersebut digunakan. IV dibuat acak untuk setiap payload, plaintext dienkripsi dengan AES-GCM, lalu AES key dibungkus memakai RSA-OAEP.
 
-Melempar `EncryptionException` bila public key tidak ditemukan/tidak valid, pembuatan JSON array gagal, atau proses AES/RSA gagal.
+Mengembalikan satu string kompak berawalan `AHE3.`. Komponen kriptografis
+dikemas di dalam string tersebut tanpa metadata JSON yang terlihat. Method
+melempar `EncryptionException` bila public key tidak ditemukan/tidak valid,
+pembuatan JSON array gagal, atau proses AES/RSA gagal.
 
 ### `HybridEncryptionService::decrypt(string $keyId, array|string $payload, ?string $aesKey = null): array|string`
 
-Memvalidasi field payload, membuka kunci AES menggunakan private key untuk `$keyId`, lalu mendekripsi data dengan AES-GCM. Payload dapat berupa array PHP atau string JSON. Jika payload dibuat dengan AES generated, `$aesKey` yang sama wajib diberikan.
+Membongkar string kompak, membuka kunci AES menggunakan private key untuk
+`$keyId`, lalu mendekripsi data dengan AES-GCM. Format array atau string JSON
+lama masih dapat dibaca untuk kompatibilitas. Jika payload dibuat dengan AES
+generated, `$aesKey` yang sama wajib diberikan.
 
 Melempar `DecryptionException` bila field wajib tidak valid, private key gagal dibuka, Base64 tidak valid, RSA gagal, atau authentication tag AES tidak cocok.
 
